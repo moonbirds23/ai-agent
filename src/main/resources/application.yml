@@ -1,0 +1,32 @@
+spring:
+  ai:
+    openai:
+      api-key: ${DEEPSEEK_API_KEY:sk-8c5e4ffdbff94ebb9ffaf0679d7fe72f}
+      base-url: https://api.deepseek.com
+      chat:
+        options:
+          model: deepseek-chat
+        
+  application:
+    name: aiagent
+server:
+  port: 8231
+  servlet:
+    context-path: /api
+# springdoc-openapi
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+    tags-sorter: alpha
+    operations-sorter: alpha
+  api-docs:
+    path: /v3/api-docs
+  group-configs:
+    - group: 'default'
+      paths-to-match: '/**'
+      packages-to-scan: com.zzp.aiagent.controller
+# knife4j
+knife4j:
+  enable: true
+  setting:
+    language: zh_cn
