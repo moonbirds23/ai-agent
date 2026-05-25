@@ -5,10 +5,11 @@ import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.boot.CommandLineRunner;
+import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
-// 取消注释即可在 SpringBoot 项目启动时执行
 @Component
+@Profile("!test")
 public class SpringAiAiInvoke implements CommandLineRunner {
 
     @Resource
