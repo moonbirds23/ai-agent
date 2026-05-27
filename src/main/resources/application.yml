@@ -6,9 +6,28 @@ spring:
       chat:
         options:
           model: deepseek-chat
-        
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      timeout: 3000ms
+      lettuce:
+        pool:
+          max-active: 8
+          max-idle: 4
+          min-idle: 1
   application:
     name: aiagent
+
+zhipu:
+  api-key: ${ZHIPU_API_KEY:}
+  image:
+    api-key: ${ZHIPU_API_KEY:}
+  vision:
+    api-key: ${ZHIPU_API_KEY:}
+    model: ${ZHIPU_VISION_MODEL:glm-4.5v}
+
 server:
   port: 8231
   servlet:

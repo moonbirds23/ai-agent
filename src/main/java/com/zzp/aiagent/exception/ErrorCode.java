@@ -1,41 +1,32 @@
 package com.zzp.aiagent.exception;
 
 import lombok.Getter;
-import org.springframework.http.HttpStatus;
 
 @Getter
 public enum ErrorCode {
 
-    // 输入校验 1xxx
-    EMPTY_MESSAGE(      "1001", "消息不能为空",            HttpStatus.BAD_REQUEST, false),
-    MESSAGE_TOO_LONG(   "1002", "消息超过长度限制",        HttpStatus.BAD_REQUEST, false),
-    UNSUPPORTED_FORMAT( "1003", "不支持的文件格式",        HttpStatus.BAD_REQUEST, false),
+    SUCCESS(0, "ok"),
+    PARAMS_ERROR(40000, "请求参数错误"),
+    EMPTY_MESSAGE(40100, "消息不能为空"),
+    MESSAGE_TOO_LONG(40101, "消息超过长度限制"),
+    CONTENT_BLOCKED(40200, "请求包含不支持的词汇"),
+    AI_AUTH_FAILED(50000, "AI 服务鉴权失败"),
+    AI_RATE_LIMIT(50001, "AI 服务请求过于频繁"),
+    AI_TIMEOUT(50002, "AI 服务响应超时"),
+    AI_MODEL_UNAVAILABLE(50003, "AI 模型暂不可用"),
+    MEMORY_ERROR(50010, "对话记忆异常"),
+    IMAGE_TOO_LARGE(40201, "图片尺寸超过限制"),
+    IMAGE_FORMAT_INVALID(40202, "不支持的图片格式"),
+    UNSUPPORTED_MEDIA_TYPE(40203, "不支持的多媒体类型"),
+    IMAGE_GENERATION_FAILED(50020, "图片生成失败"),
+    IMAGE_ANALYSIS_FAILED(50021, "图片分析失败"),
+    SYSTEM_ERROR(59999, "系统内部异常");
 
-    // 内容安全 2xxx
-    CONTENT_BLOCKED(    "2001", "请求包含不支持的词汇",      HttpStatus.FORBIDDEN, false),
+    private final int code;
+    private final String message;
 
-    // AI 服务 3xxx
-    AI_AUTH_FAILED(     "3001", "AI 服务鉴权失败",         HttpStatus.INTERNAL_SERVER_ERROR, false),
-    AI_RATE_LIMIT(      "3002", "AI 服务请求过于频繁",      HttpStatus.TOO_MANY_REQUESTS, true),
-    AI_TIMEOUT(         "3003", "AI 服务响应超时",         HttpStatus.GATEWAY_TIMEOUT, true),
-    AI_MODEL_UNAVAILABLE("3004","AI 模型暂不可用",         HttpStatus.INTERNAL_SERVER_ERROR, true),
-
-    // 对话记忆 4xxx
-    MEMORY_READ_FAILED(  "4001", "对话记忆读取失败",        HttpStatus.INTERNAL_SERVER_ERROR, true),
-    MEMORY_WRITE_FAILED( "4002", "对话记忆保存失败",        HttpStatus.INTERNAL_SERVER_ERROR, true),
-
-    // 通用
-    INTERNAL_ERROR(     "9999", "系统异常，请稍后重试",      HttpStatus.INTERNAL_SERVER_ERROR, true);
-
-    private final String code;
-    private final String userMessage;
-    private final HttpStatus httpStatus;
-    private final boolean retryable;
-
-    ErrorCode(String code, String userMessage, HttpStatus httpStatus, boolean retryable) {
+    ErrorCode(int code, String message) {
         this.code = code;
-        this.userMessage = userMessage;
-        this.httpStatus = httpStatus;
-        this.retryable = retryable;
+        this.message = message;
     }
 }

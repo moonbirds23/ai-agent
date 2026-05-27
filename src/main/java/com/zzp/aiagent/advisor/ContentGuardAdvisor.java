@@ -1,95 +1,95 @@
 package com.zzp.aiagent.advisor;
 
-import com.zzp.aiagent.exception.ContentSafetyException;
+import com.zzp.aiagent.common.ThrowUtils;
+import com.zzp.aiagent.exception.BusinessException;
 import com.zzp.aiagent.exception.ErrorCode;
-import com.zzp.aiagent.exception.InvalidInputException;
 import org.springframework.ai.chat.client.advisor.api.AdvisedRequest;
 import org.springframework.ai.chat.client.advisor.api.AdvisedResponse;
 import org.springframework.ai.chat.client.advisor.api.CallAroundAdvisor;
 import org.springframework.ai.chat.client.advisor.api.CallAroundAdvisorChain;
 import org.springframework.ai.chat.client.advisor.api.StreamAroundAdvisor;
 import org.springframework.ai.chat.client.advisor.api.StreamAroundAdvisorChain;
+import org.springframework.ai.chat.messages.Message;
+import org.springframework.ai.chat.messages.UserMessage;
+import org.springframework.core.io.Resource;
 import reactor.core.publisher.Flux;
 
+import java.net.URL;
 import java.util.List;
+import java.util.Set;
 
-/**
- * <h3>职责</h3>
- * 在 Prompt 到达大模型之前做输入校验，不合法直接抛异常短路后续所有 Advisor。
- * 相当于 AOP 中 Order=0 的前置通知。
- *
- * <h3>校验顺序</h3>
- * <ol>
- *   <li>空值检查：null 或 blank → EMPTY_MESSAGE(1001)</li>
- *   <li>长度检查：超过 2000 字符 → MESSAGE_TOO_LONG(1002)</li>
- *   <li>敏感词检查：命中关键词列表 → CONTENT_BLOCKED(2001)</li>
- * </ol>
- *
- * <h3>短路机制</h3>
- * 通过抛异常实现，不 return 任何值。异常沿调用栈向上，
- * 被 {@link ExceptionGuardAdvisor} (order=MAX) 或 {@link GlobalExceptionHandler} 捕获转友好回复。
- *
- * <h3>同时支持流式/非流式</h3>
- * 两个重载方法共享同一个 {@link #validate(AdvisedRequest)}，校验逻辑一致。
- *
- *
- * @see ExceptionGuardAdvisor
- */
 public class ContentGuardAdvisor implements CallAroundAdvisor, StreamAroundAdvisor {
+    // 双接口实现：非流式和流式共用validate()，避免校验逻辑分叉
 
     private static final int MAX_MESSAGE_LENGTH = 2000;
-
-    /** 敏感词列表——命中任一词即拦截。可扩展为从配置中心动态加载。 */
     private static final List<String> BLOCKED_KEYWORDS = List.of("暴力", "色情", "政治敏感");
+    private static final int MAX_IMAGES_PER_REQUEST = 5;
+    private static final long MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+    private static final Set<String> ALLOWED_IMAGE_TYPES = Set.of("png", "jpeg", "jpg", "webp", "gif");
 
-    /**
-     * 非流式调用入口。
-     *
-     * @param request 包含 userText/messages/adviseContext 的请求封装
-     * @param chain   后续 Advisor 调用链
-     * @return 下游 Advisor 的响应
-     * @throws InvalidInputException  输入不合法
-     * @throws ContentSafetyException 命中敏感词
-     */
     @Override
     public AdvisedResponse aroundCall(AdvisedRequest request, CallAroundAdvisorChain chain) {
         validate(request);
         return chain.nextAroundCall(request);
     }
 
-    /**
-     * 流式调用入口——校验逻辑与非流式完全一致。
-     * 流式场景下抛异常，由 Reactor 的错误信号传递，
-     * 最终被 ExceptionGuardAdvisor.aroundStream 的 onErrorResume 兜住。
-     */
     @Override
     public Flux<AdvisedResponse> aroundStream(AdvisedRequest request, StreamAroundAdvisorChain chain) {
-        validate(request);
+        // validate()同步抛异常会穿透.onErrorResume()（Flux尚未组装完毕），
+        // 必须转为Flux.error()让异常进入响应式流，ExceptionGuardAdvisor才能兜底
+        try {
+            validate(request);
+        } catch (BusinessException e) {
+            return Flux.error(e);
+        }
         return chain.nextAroundStream(request);
     }
 
-    /**
-     * 三层校验，按开销从小到大排列：
-     * null/空判断（O(1)）→ 长度判断（O(1)）→ 敏感词遍历（O(n)）。
-     * 这样大多数非法请求在前两步就被拦截，减少不必要的字符串匹配开销。
-     */
     private void validate(AdvisedRequest request) {
         String message = request.userText();
 
-        // 第一层：空值——最常见的非法输入
-        if (message == null || message.isBlank()) {
-            throw new InvalidInputException(ErrorCode.EMPTY_MESSAGE);
-        }
-        // 第二层：长度——防止 token 超限导致后续调用失败
-        if (message.length() > MAX_MESSAGE_LENGTH) {
-            throw new InvalidInputException(ErrorCode.MESSAGE_TOO_LONG,
-                    "当前长度 " + message.length() + "，最大允许 " + MAX_MESSAGE_LENGTH);
-        }
-        // 第三层：敏感词——开销最大，放在最后
+        ThrowUtils.throwIf(message == null || message.isBlank(), ErrorCode.EMPTY_MESSAGE);
+        ThrowUtils.throwIf(message.length() > MAX_MESSAGE_LENGTH, ErrorCode.MESSAGE_TOO_LONG,
+                "当前长度 " + message.length() + "，最大允许 " + MAX_MESSAGE_LENGTH);
         String lower = message.toLowerCase();
         for (String keyword : BLOCKED_KEYWORDS) {
-            if (lower.contains(keyword)) {
-                throw new ContentSafetyException("消息包含违规词汇: " + keyword);
+            ThrowUtils.throwIf(lower.contains(keyword), ErrorCode.CONTENT_BLOCKED,
+                    "消息包含违规词汇: " + keyword);
+        }
+        validateImages(request.messages());
+    }
+
+    private void validateImages(List<Message> messages) {
+        if (messages == null) return;
+        int totalImages = 0;
+        for (Message msg : messages) {
+            if (!(msg instanceof UserMessage um)) continue;
+            var media = um.getMedia();
+            if (media == null || media.isEmpty()) continue;
+            totalImages += media.size();
+            ThrowUtils.throwIf(totalImages > MAX_IMAGES_PER_REQUEST, ErrorCode.IMAGE_TOO_LARGE,
+                    "单次最多上传 " + MAX_IMAGES_PER_REQUEST + " 张图片");
+
+            for (var m : media) {
+                Object data = m.getData();
+                ThrowUtils.throwIf(data == null, ErrorCode.IMAGE_FORMAT_INVALID, "图片数据为空");
+                long size = -1;
+                if (data instanceof byte[] bytes) {
+                    // Spring AI 内部会把 ByteArrayResource 读成 byte[] 存储，这是实际生效的分支
+                    size = bytes.length;
+                } else if (data instanceof Resource res) {
+                    // 兜底：Spring AI 升级后若改回 Resource 类型，校验仍生效
+                    try {
+                        size = res.contentLength();
+                    } catch (java.io.IOException e) {
+                        // contentLength 不可用则跳过大小校验
+                    }
+                }
+                if (size > 0) {
+                    ThrowUtils.throwIf(size > MAX_IMAGE_BYTES, ErrorCode.IMAGE_TOO_LARGE,
+                            "图片大小 " + (size / 1024 / 1024) + "MB，最大允许 10MB");
+                }
+                // URL 类型不做深度校验，仅检查非空
             }
         }
     }
@@ -99,13 +99,8 @@ public class ContentGuardAdvisor implements CallAroundAdvisor, StreamAroundAdvis
         return "ContentGuard";
     }
 
-    /**
-     * Order=0：在所有 Advisor 中第一个执行。
-     * 非法请求不应消耗下游资源（Memory 恢复、Prompt 改写、大模型调用），
-     * 必须在最外层拦截。
-     */
     @Override
     public int getOrder() {
-        return 0;
+        return 0;   // 最优先：在任何业务逻辑（含记忆检索）之前拦截非法输入
     }
 }

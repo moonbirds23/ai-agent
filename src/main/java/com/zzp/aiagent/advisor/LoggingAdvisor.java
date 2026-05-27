@@ -18,20 +18,8 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * 全量请求/响应日志记录器。
- *
- * <h3>记录内容</h3>
- * <ul>
- *   <li>请求时间、会话 ID、调用方式（流式/非流式）</li>
- *   <li>用户原始输入（从 adviseContext 中读取，由 PromptOptimizeAdvisor 写入）</li>
- *   <li>实际发往模型的 Prompt（可能已被上游 Advisor 改写）</li>
- *   <li>AI 完整回复文本及字符数</li>
- *   <li>调用耗时（ms）</li>
- * </ul>
- *
- * <h3>流式处理</h3>
- * 通过 {@link MessageAggregator#aggregateAdvisedResponse} 聚合流式 token，
- * 在流完成时输出完整回复日志。聚合不阻塞 SSE 推送。
+ * 全量日志记录：原始输入、改写后Prompt、回复内容、耗时。
+ * 流式通过MessageAggregator聚合token，聚合不阻塞SSE推送，在流完成时输出完整日志。
  */
 @Slf4j
 public class LoggingAdvisor implements CallAroundAdvisor, StreamAroundAdvisor {

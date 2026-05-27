@@ -1,5 +1,6 @@
 package com.zzp.aiagent.advisor;
 
+import com.zzp.aiagent.common.PromptTemplate;
 import org.springframework.ai.chat.client.advisor.api.AdvisedRequest;
 import org.springframework.ai.chat.client.advisor.api.AdvisedResponse;
 import org.springframework.ai.chat.client.advisor.api.CallAroundAdvisor;
@@ -12,29 +13,21 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * Prompt 优化增强器 —— 将口语化描述扩写为专业生图 prompt。
- *
- * <h3>职责</h3>
- * 前置：改写 userText，将 "一张雪景" 扩展为包含主体/环境/光效/风格/画质的完整 prompt。
- * 后置：将优化后的 prompt 写入 adviseContext 供下游 Advisor 读取。
- *
+ * 前置改写userText为专业生图prompt，后置将改写结果写入adviseContext供下游读取。
  */
 public class PromptOptimizeAdvisor implements CallAroundAdvisor, StreamAroundAdvisor {
 
-    /** 生图 prompt 模板——可扩展为调用轻量模型动态生成 */
-    private static final String OPTIMIZE_TEMPLATE =
-            "请基于用户的图片需求描述，生成一个优化的图片生成提示词(prompt)，包含以下要素：" +
-            "画面主体、环境背景、光线氛围、艺术风格、画质描述。" +
-            "用户需求：%s";
+    private final PromptTemplate promptTemplate;
 
     /** adviseContext 中共享优化 prompt 的 key */
     public static final String KEY_OPTIMIZED_PROMPT = "optimizedPrompt";
     /** adviseContext 中共享原始用户输入的 key —— 供下游 LoggingAdvisor 记录 */
     public static final String KEY_ORIGINAL_INPUT = "originalUserText";
 
-    /**
-     * 非流式：前置改写 Prompt → 调用下游 → 后置写入共享上下文。
-     */
+    public PromptOptimizeAdvisor(PromptTemplate promptTemplate) {
+        this.promptTemplate = promptTemplate;
+    }
+
     @Override
     public AdvisedResponse aroundCall(AdvisedRequest request, CallAroundAdvisorChain chain) {
         AdvisedRequest enhanced = enhance(request);
@@ -42,10 +35,6 @@ public class PromptOptimizeAdvisor implements CallAroundAdvisor, StreamAroundAdv
         return attachOptimizedContext(response, enhanced.userText());
     }
 
-    /**
-     * 流式：前置改写 → 调用下游（返回 Flux） → 对每个 AdvisedResponse 写入共享上下文。
-     * 用 {@link Flux#map} 而非 doOnNext，因为需要修改 AdvisedResponse 本身。
-     */
     @Override
     public Flux<AdvisedResponse> aroundStream(AdvisedRequest request, StreamAroundAdvisorChain chain) {
         AdvisedRequest enhanced = enhance(request);
@@ -53,32 +42,24 @@ public class PromptOptimizeAdvisor implements CallAroundAdvisor, StreamAroundAdv
                 .map(r -> attachOptimizedContext(r, enhanced.userText()));
     }
 
-    /**
-     * 前置增强：将原始输入存入 adviseContext（供下游日志记录），
-     * 再用模板将口语描述扩写为专业生图 prompt。
-     * 空消息直接原样放行——不做多余处理，交给 ContentGuard 提前拦截。
-     */
     private AdvisedRequest enhance(AdvisedRequest request) {
         String original = request.userText();
         if (original == null || original.isBlank()) {
             return request;
         }
-        String optimized = String.format(OPTIMIZE_TEMPLATE, original);
+        String optimized = promptTemplate.render("default", "optimize", "userInput", original);
+        // adviseContext是unmodifiableMap，必须复制→修改→重建（Record不可变语义）
         Map<String, Object> ctx = new HashMap<>(request.adviseContext());
-        ctx.put(KEY_ORIGINAL_INPUT, original);
+        ctx.put(KEY_ORIGINAL_INPUT, original);               // 原始输入供LoggingAdvisor记录
         return AdvisedRequest.from(request)
-                .userText(optimized)
+                .userText(optimized)                         // 替换为增强后的prompt，LLM实际收到的是这个
                 .adviseContext(ctx)
                 .build();
     }
 
-    /**
-     * 后置：将优化后的 prompt 写入 adviseContext，供下游 Advisor 观测或日志记录。
-     * 必须复制原有 Map 再 put，不可直接修改——M6 的 Record 语义要求不可变。
-     */
     private AdvisedResponse attachOptimizedContext(AdvisedResponse response, String optimized) {
         Map<String, Object> ctx = new HashMap<>(response.adviseContext());
-        ctx.put(KEY_OPTIMIZED_PROMPT, optimized);
+        ctx.put(KEY_OPTIMIZED_PROMPT, optimized);            // 供下游Advisor观测改写结果
         return AdvisedResponse.from(response).adviseContext(ctx).build();
     }
 

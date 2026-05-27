@@ -1,67 +1,354 @@
 package com.zzp.aiagent.app;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zzp.aiagent.advisor.ContentGuardAdvisor;
 import com.zzp.aiagent.advisor.ExceptionGuardAdvisor;
 import com.zzp.aiagent.advisor.LoggingAdvisor;
 import com.zzp.aiagent.advisor.PromptOptimizeAdvisor;
+import com.zzp.aiagent.common.PromptTemplate;
+import com.zzp.aiagent.common.ThrowUtils;
+import com.zzp.aiagent.exception.BusinessException;
+import com.zzp.aiagent.exception.ErrorCode;
+import com.zzp.aiagent.image.ImageGenerationService;
+import com.zzp.aiagent.image.VisionAnalysisService;
+import com.zzp.aiagent.model.dto.chat.ChatRequest;
+import com.zzp.aiagent.model.dto.image.ImageAgentResponse;
+import com.zzp.aiagent.model.dto.image.ImageGenerationResult;
+import com.zzp.aiagent.model.dto.image.VisionAnalysisResult;
+import com.zzp.aiagent.model.vo.ChatResponseVO;
+import com.zzp.aiagent.model.vo.StreamEventVO;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
 import org.springframework.ai.chat.memory.ChatMemory;
-import org.springframework.ai.chat.memory.InMemoryChatMemory;
+import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatModel;
+import org.springframework.ai.converter.BeanOutputConverter;
+import org.springframework.ai.model.Media;
 import org.springframework.context.annotation.Profile;
+import org.springframework.core.io.ByteArrayResource;
 import org.springframework.stereotype.Component;
+import org.springframework.util.MimeTypeUtils;
 import reactor.core.publisher.Flux;
+
+import java.net.URL;
+import java.util.Base64;
+import java.util.List;
+import java.util.Locale;
+import java.util.Set;
+import java.util.function.Consumer;
 
 @Component
 @Profile("!test")
 @Slf4j
 public class PictureApp {
 
+    private static final long MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+    private static final Set<String> ALLOWED_IMAGE_TYPES = Set.of("png", "jpeg", "jpg", "webp", "gif");
+
     private final ChatClient chatClient;
     private final ChatMemory chatMemory;
+    private final BeanOutputConverter<ImageAgentResponse> outputConverter;
+    private final ObjectMapper objectMapper;
+    private final ImageGenerationService imageGenerationService;
+    private final VisionAnalysisService visionAnalysisService;
 
-    private static final String SYSTEM_PROMPT = "你是云图库存储平台中的AI图片生成助手。开场向用户表明身份，告知用户可通过描述生成并存储图片。" +
-            "围绕生活记录、创意设计、工作学习三种场景提问：生活记录场景询问旅行、聚会、亲子等日常瞬间的呈现需求；" +
-            "创意设计场景询问风格偏好（插画、写实、二次元等）、色彩主题与构图想法；" +
-            "工作学习场景询问PPT配图、海报、思维导图等用途及尺寸要求。" +
-            "引导用户详述画面主体、背景环境、光影氛围及情感基调，以便生成精准匹配的图片并存入云图库。";
-
-    public PictureApp(ChatModel openAiChatModel) {
-        this.chatMemory = new InMemoryChatMemory();
+    public PictureApp(ChatModel openAiChatModel, ChatMemory chatMemory, PromptTemplate promptTemplate,
+                      ImageGenerationService imageGenerationService, VisionAnalysisService visionAnalysisService) {
+        this.chatMemory = chatMemory;
+        this.outputConverter = new BeanOutputConverter<>(ImageAgentResponse.class);
+        this.objectMapper = new ObjectMapper();
+        this.imageGenerationService = imageGenerationService;
+        this.visionAnalysisService = visionAnalysisService;
+        String systemPrompt = promptTemplate.render("default", "system",
+                "outputFormat", outputConverter.getFormat());
         this.chatClient = ChatClient.builder(openAiChatModel)
-                .defaultSystem(SYSTEM_PROMPT)
+                .defaultSystem(systemPrompt)
                 .defaultAdvisors(
                         new ContentGuardAdvisor(),
                         new MessageChatMemoryAdvisor(chatMemory),
-                        new PromptOptimizeAdvisor(),
+                        new PromptOptimizeAdvisor(promptTemplate),
                         new LoggingAdvisor(),
                         new ExceptionGuardAdvisor()
                 )
                 .build();
     }
 
-    public String doChat(String message, String chatId) {
-        return chatClient.prompt()
-                .user(message)
+    // ── 非流式入口 ─────────────────────────────────────────────────
+
+    public ChatResponseVO doChat(ChatRequest request, String chatId) {
+        return switch (resolveMode(request)) {
+            case ChatRequest.MODE_IMAGE_ANALYSIS -> handleImageAnalysis(request, chatId);
+            case ChatRequest.MODE_IMAGE_GENERATION -> handleGeneration(request, chatId);
+            case ChatRequest.MODE_CHAT -> handleDiscussion(request, chatId);
+            default -> throw new BusinessException(ErrorCode.PARAMS_ERROR, "不支持的对话模式: " + request.mode());
+        };
+    }
+
+    // ── 讨论模式 ──────────────────────────────────────────────────
+
+    private ChatResponseVO handleDiscussion(ChatRequest request, String chatId) {
+        ImageAgentResponse aiResp = chatClient.prompt()
+                .user(buildUserSpec(request))
                 .advisors(spec -> spec
                         .param(MessageChatMemoryAdvisor.CHAT_MEMORY_CONVERSATION_ID_KEY, chatId)
                         .param(MessageChatMemoryAdvisor.CHAT_MEMORY_RETRIEVE_SIZE_KEY, 10)
                         .param("chatId", chatId))
                 .call()
-                .chatResponse()
-                .getResult().getOutput().getText();
+                .entity(outputConverter);
+        return ChatResponseVO.objToVo(aiResp, chatId);
     }
 
-    public Flux<String> doChatStream(String message, String chatId) {
-        return chatClient.prompt()
-                .user(message)
+    // ── 图片分析模式 ────────────────────────────────────────────────
+
+    private ChatResponseVO handleImageAnalysis(ChatRequest request, String chatId) {
+        validateImageAnalysisRequest(request);
+        VisionAnalysisResult result = visionAnalysisService.analyze(
+                request.message(), request.imageBase64(), request.imageUrl());
+        ChatResponseVO data = ChatResponseVO.imageAnalyzed(chatId, result);
+        saveImageAnalysisMemory(request, chatId, result);
+        return data;
+    }
+
+    // ── 生成模式 ──────────────────────────────────────────────────
+
+    private ChatResponseVO handleGeneration(ChatRequest request, String chatId) {
+        String msg = request.message() != null && !request.message().isBlank()
+                ? request.message()
+                : "基于以上对话内容，请生成最终的图片生成参数";
+
+        ImageAgentResponse aiResp = chatClient.prompt()
+                .user(msg)
+                .advisors(spec -> spec
+                        .param(MessageChatMemoryAdvisor.CHAT_MEMORY_CONVERSATION_ID_KEY, chatId)
+                        .param(MessageChatMemoryAdvisor.CHAT_MEMORY_RETRIEVE_SIZE_KEY, 50)
+                        .param("chatId", chatId))
+                .call()
+                .entity(outputConverter);
+
+        ImageGenerationResult genResult = imageGenerationService.generate(
+                aiResp.imagePrompt(), aiResp.style(), aiResp.dimensions());
+
+        return ChatResponseVO.imageGenerated(chatId, genResult.imageUrl(), genResult.imageBase64(),
+                aiResp.message(), aiResp.imagePrompt(), aiResp.style(), aiResp.dimensions(), aiResp.revisedPrompt());
+    }
+
+    // ── 流式入口 ──────────────────────────────────────────────────
+
+    public Flux<StreamEventVO> doChatStream(ChatRequest request, String chatId) {
+        return switch (resolveMode(request)) {
+            case ChatRequest.MODE_IMAGE_ANALYSIS -> handleImageAnalysisStream(request, chatId);
+            case ChatRequest.MODE_IMAGE_GENERATION -> handleGenerationStream(request, chatId);
+            case ChatRequest.MODE_CHAT -> handleDiscussionStream(request, chatId);
+            default -> Flux.just(StreamEventVO.error("不支持的对话模式: " + request.mode()));
+        };
+    }
+
+    // ── 流式讨论模式 ──────────────────────────────────────────────
+
+    private Flux<StreamEventVO> handleDiscussionStream(ChatRequest request, String chatId) {
+        StringBuilder accumulator = new StringBuilder();
+
+        Flux<StreamEventVO> tokenFlux = chatClient.prompt()
+                .user(buildUserSpec(request))
                 .advisors(spec -> spec
                         .param(MessageChatMemoryAdvisor.CHAT_MEMORY_CONVERSATION_ID_KEY, chatId)
                         .param(MessageChatMemoryAdvisor.CHAT_MEMORY_RETRIEVE_SIZE_KEY, 10)
                         .param("chatId", chatId))
                 .stream()
-                .content();
+                .content()
+                .doOnNext(accumulator::append)
+                .map(StreamEventVO::token);
+
+        Flux<StreamEventVO> doneEvent = Flux.defer(() -> {
+            String fullText = accumulator.toString();
+            ChatResponseVO data = parseStructuredOrFallback(fullText, chatId);
+            return Flux.just(StreamEventVO.done(chatId, data));
+        });
+
+        return Flux.concat(
+                Flux.just(StreamEventVO.chatId(chatId)),
+                tokenFlux,
+                doneEvent
+        ).onErrorResume(e -> {
+            String errorMsg;
+            if (e instanceof BusinessException be) {
+                log.warn("[Stream] 业务异常 chatId={} code={}", chatId, be.getCode());
+                errorMsg = be.getMessage();
+            } else {
+                log.error("[Stream] 未知异常 chatId={}", chatId, e);
+                errorMsg = "流式处理异常，请重试";
+            }
+            return Flux.just(StreamEventVO.error(errorMsg));
+        });
+    }
+
+    // ── 流式图片分析模式 ────────────────────────────────────────────
+
+    private Flux<StreamEventVO> handleImageAnalysisStream(ChatRequest request, String chatId) {
+        Flux<StreamEventVO> doneEvent = Flux.defer(() -> {
+            validateImageAnalysisRequest(request);
+            VisionAnalysisResult result = visionAnalysisService.analyze(
+                    request.message(), request.imageBase64(), request.imageUrl());
+            ChatResponseVO data = ChatResponseVO.imageAnalyzed(chatId, result);
+            saveImageAnalysisMemory(request, chatId, result);
+            return Flux.just(StreamEventVO.done(chatId, data));
+        });
+
+        return Flux.concat(
+                Flux.just(
+                        StreamEventVO.chatId(chatId),
+                        StreamEventVO.progress(chatId, "正在分析图片...")),
+                doneEvent
+        ).onErrorResume(e -> {
+            String errorMsg;
+            if (e instanceof BusinessException be) {
+                log.warn("[Stream-ImageAnalysis] 业务异常 chatId={} code={}", chatId, be.getCode());
+                errorMsg = be.getMessage();
+            } else {
+                log.error("[Stream-ImageAnalysis] 未知异常 chatId={}", chatId, e);
+                errorMsg = "图片分析异常，请重试";
+            }
+            return Flux.just(StreamEventVO.error(errorMsg));
+        });
+    }
+
+    // ── 流式生成模式 ──────────────────────────────────────────────
+
+    private Flux<StreamEventVO> handleGenerationStream(ChatRequest request, String chatId) {
+        String msg = request.message() != null && !request.message().isBlank()
+                ? request.message()
+                : "基于以上对话内容，请生成最终的图片生成参数";
+
+        Flux<StreamEventVO> generateEvent = Flux.defer(() -> {
+            ImageAgentResponse aiResp = chatClient.prompt()
+                    .user(msg)
+                    .advisors(spec -> spec
+                            .param(MessageChatMemoryAdvisor.CHAT_MEMORY_CONVERSATION_ID_KEY, chatId)
+                            .param(MessageChatMemoryAdvisor.CHAT_MEMORY_RETRIEVE_SIZE_KEY, 50)
+                            .param("chatId", chatId))
+                    .call()
+                    .entity(outputConverter);
+
+            return Flux.concat(
+                    Flux.just(StreamEventVO.progress(chatId, "正在生成图片...")),
+                    Flux.defer(() -> {
+                        ImageGenerationResult genResult = imageGenerationService.generate(
+                                aiResp.imagePrompt(), aiResp.style(), aiResp.dimensions());
+                        ChatResponseVO data = ChatResponseVO.imageGenerated(chatId,
+                                genResult.imageUrl(), genResult.imageBase64(), aiResp.message(),
+                                aiResp.imagePrompt(), aiResp.style(), aiResp.dimensions(), aiResp.revisedPrompt());
+                        return Flux.just(StreamEventVO.done(chatId, data));
+                    })
+            );
+        });
+
+        return Flux.concat(
+                Flux.just(
+                        StreamEventVO.chatId(chatId),
+                        StreamEventVO.progress(chatId, "正在整理图片 Prompt...")),
+                generateEvent
+        ).onErrorResume(e -> {
+            String errorMsg;
+            if (e instanceof BusinessException be) {
+                log.warn("[Stream-Generation] 业务异常 chatId={} code={}", chatId, be.getCode());
+                errorMsg = be.getMessage();
+            } else {
+                log.error("[Stream-Generation] 未知异常 chatId={}", chatId, e);
+                errorMsg = "流式处理异常，请重试";
+            }
+            return Flux.just(StreamEventVO.error(errorMsg));
+        });
+    }
+
+    // ── 公共工具 ──────────────────────────────────────────────────
+
+    private String resolveMode(ChatRequest request) {
+        String mode = request.mode();
+        if (mode != null && !mode.isBlank()) {
+            return mode.trim().toLowerCase(Locale.ROOT);
+        }
+        return Boolean.TRUE.equals(request.generationMode())
+                ? ChatRequest.MODE_IMAGE_GENERATION
+                : ChatRequest.MODE_CHAT;
+    }
+
+    private void validateImageAnalysisRequest(ChatRequest request) {
+        ThrowUtils.throwIf(!hasImage(request), ErrorCode.PARAMS_ERROR, "请先上传需要分析的图片");
+        if (request.imageBase64() == null || request.imageBase64().isBlank()) {
+            return;
+        }
+        String data = request.imageBase64().trim();
+        String lower = data.toLowerCase(Locale.ROOT);
+        if (lower.startsWith("data:")) {
+            int slash = lower.indexOf('/');
+            int semicolon = lower.indexOf(';');
+            ThrowUtils.throwIf(!lower.startsWith("data:image/") || slash < 0 || semicolon < slash,
+                    ErrorCode.IMAGE_FORMAT_INVALID, "不支持的图片格式");
+            String type = lower.substring(slash + 1, semicolon);
+            ThrowUtils.throwIf(!ALLOWED_IMAGE_TYPES.contains(type), ErrorCode.IMAGE_FORMAT_INVALID,
+                    "不支持的图片格式: " + type);
+        }
+        byte[] bytes;
+        try {
+            bytes = Base64.getDecoder().decode(stripDataUrlPrefix(data));
+        } catch (IllegalArgumentException e) {
+            throw new BusinessException(ErrorCode.IMAGE_FORMAT_INVALID, "图片数据不是有效的 Base64");
+        }
+        ThrowUtils.throwIf(bytes.length > MAX_IMAGE_BYTES, ErrorCode.IMAGE_TOO_LARGE,
+                "图片大小 " + (bytes.length / 1024 / 1024) + "MB，最大允许 10MB");
+    }
+
+    private boolean hasImage(ChatRequest request) {
+        return (request.imageBase64() != null && !request.imageBase64().isBlank())
+                || (request.imageUrl() != null && !request.imageUrl().isBlank());
+    }
+
+    private void saveImageAnalysisMemory(ChatRequest request, String chatId, VisionAnalysisResult result) {
+        String userText = request.message() == null || request.message().isBlank()
+                ? "请分析这张图片"
+                : request.message();
+        chatMemory.add(chatId, List.of(
+                new UserMessage(userText),
+                new AssistantMessage(result.memoryText())
+        ));
+    }
+
+    private Consumer<ChatClient.PromptUserSpec> buildUserSpec(ChatRequest request) {
+        return spec -> {
+            spec.text(request.message());
+            String imageBase64 = request.imageBase64();
+            String imageUrl = request.imageUrl();
+            if (imageBase64 != null && !imageBase64.isBlank()) {
+                byte[] bytes = Base64.getDecoder().decode(stripDataUrlPrefix(imageBase64));
+                spec.media(new Media(MimeTypeUtils.IMAGE_PNG, new ByteArrayResource(bytes)));
+            } else if (imageUrl != null && !imageUrl.isBlank()) {
+                try {
+                    spec.media(new Media(MimeTypeUtils.IMAGE_PNG, new URL(imageUrl)));
+                } catch (Exception e) {
+                    log.warn("[PictureApp] 无效图片URL: {}", imageUrl, e);
+                }
+            }
+        };
+    }
+
+    private String stripDataUrlPrefix(String imageBase64) {
+        String trimmed = imageBase64.trim();
+        int comma = trimmed.indexOf(',');
+        if (trimmed.startsWith("data:image/") && comma >= 0) {
+            return trimmed.substring(comma + 1);
+        }
+        return trimmed;
+    }
+
+    private ChatResponseVO parseStructuredOrFallback(String rawText, String chatId) {
+        try {
+            ImageAgentResponse parsed = objectMapper.readValue(rawText, ImageAgentResponse.class);
+            return ChatResponseVO.objToVo(parsed, chatId);
+        } catch (Exception e) {
+            log.warn("[Stream] 无法解析LLM输出为ImageAgentResponse，回退为纯文本 chatId={}", chatId);
+            return ChatResponseVO.textOnly(chatId, rawText);
+        }
     }
 }
