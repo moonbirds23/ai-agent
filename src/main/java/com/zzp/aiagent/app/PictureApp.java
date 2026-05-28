@@ -11,9 +11,10 @@ import com.zzp.aiagent.exception.BusinessException;
 import com.zzp.aiagent.exception.ErrorCode;
 import com.zzp.aiagent.image.ImageGenerationService;
 import com.zzp.aiagent.image.VisionAnalysisService;
-import com.zzp.aiagent.knowledge.KnowledgeService;
-import com.zzp.aiagent.knowledge.model.KnowledgeAsset;
 import com.zzp.aiagent.model.dto.chat.ChatRequest;
+import com.zzp.aiagent.rag.PromptReferenceAssembler;
+import com.zzp.aiagent.rag.RagService;
+import com.zzp.aiagent.rag.model.RagContext;
 import com.zzp.aiagent.model.dto.image.ImageAgentResponse;
 import com.zzp.aiagent.model.dto.image.ImageGenerationResult;
 import com.zzp.aiagent.model.dto.image.VisionAnalysisResult;
@@ -55,17 +56,19 @@ public class PictureApp {
     private final ObjectMapper objectMapper;
     private final ImageGenerationService imageGenerationService;
     private final VisionAnalysisService visionAnalysisService;
-    private final KnowledgeService knowledgeService;
+    private final RagService ragService;
+    private final PromptReferenceAssembler assembler;
 
     public PictureApp(ChatModel openAiChatModel, ChatMemory chatMemory, PromptTemplate promptTemplate,
                       ImageGenerationService imageGenerationService, VisionAnalysisService visionAnalysisService,
-                      KnowledgeService knowledgeService) {
+                      RagService ragService, PromptReferenceAssembler assembler) {
         this.chatMemory = chatMemory;
         this.outputConverter = new BeanOutputConverter<>(ImageAgentResponse.class);
         this.objectMapper = new ObjectMapper();
         this.imageGenerationService = imageGenerationService;
         this.visionAnalysisService = visionAnalysisService;
-        this.knowledgeService = knowledgeService;
+        this.ragService = ragService;
+        this.assembler = assembler;
         String systemPrompt = promptTemplate.render("default", "system",
                 "outputFormat", outputConverter.getFormat());
         this.chatClient = ChatClient.builder(openAiChatModel)
@@ -123,7 +126,12 @@ public class PictureApp {
                 ? request.message()
                 : "基于以上对话内容，请生成最终的图片生成参数";
 
-        String augmentedMsg = augmentWithKnowledge(msg);
+        // RAG 三层增强：明确参考图 → RAG检索 → 风格模板
+        RagContext ragCtx = ragService.buildContext(request);
+        String ragDebugInfo = assembler.buildDebugInfo(ragCtx);
+        log.info("[RAG] 上下文构建完成 chatId={}:\n{}", chatId, ragDebugInfo);
+        String augmentedMsg = assembler.assemble(msg, ragCtx);
+        Object ragDebugData = assembler.buildDebugData(ragCtx, augmentedMsg);
 
         ImageAgentResponse aiResp = chatClient.prompt()
                 .user(augmentedMsg)
@@ -137,8 +145,14 @@ public class PictureApp {
         ImageGenerationResult genResult = imageGenerationService.generate(
                 aiResp.imagePrompt(), aiResp.style(), aiResp.dimensions());
 
+        // TODO: 如果 saveGeneratedToGallery=true，保存生成的图片到图库
+        if (Boolean.TRUE.equals(request.saveGeneratedToGallery())) {
+            log.info("[RAG] saveGeneratedToGallery=true chatId={}，待实现图库保存逻辑", chatId);
+        }
+
         return ChatResponseVO.imageGenerated(chatId, genResult.imageUrl(), genResult.imageBase64(),
-                aiResp.message(), aiResp.imagePrompt(), aiResp.style(), aiResp.dimensions(), aiResp.revisedPrompt());
+                aiResp.message(), aiResp.imagePrompt(), aiResp.style(), aiResp.dimensions(), aiResp.revisedPrompt(),
+                ragDebugData);
     }
 
     // ── 流式入口 ──────────────────────────────────────────────────
@@ -228,7 +242,12 @@ public class PictureApp {
                 ? request.message()
                 : "基于以上对话内容，请生成最终的图片生成参数";
 
-        String augmentedMsg = augmentWithKnowledge(msg);
+        // RAG 三层增强：明确参考图 → RAG检索 → 风格模板
+        RagContext ragCtx = ragService.buildContext(request);
+        String ragDebugInfo = assembler.buildDebugInfo(ragCtx);
+        log.info("[RAG-Stream] 上下文构建完成 chatId={}:\n{}", chatId, ragDebugInfo);
+        String augmentedMsg = assembler.assemble(msg, ragCtx);
+        Object ragDebugData = assembler.buildDebugData(ragCtx, augmentedMsg);
 
         Flux<StreamEventVO> generateEvent = Flux.defer(() -> {
             ImageAgentResponse aiResp = chatClient.prompt()
@@ -240,6 +259,11 @@ public class PictureApp {
                     .call()
                     .entity(outputConverter);
 
+            // TODO: 如果 saveGeneratedToGallery=true，保存生成的图片到图库
+            if (Boolean.TRUE.equals(request.saveGeneratedToGallery())) {
+                log.info("[RAG-Stream] saveGeneratedToGallery=true chatId={}，待实现图库保存逻辑", chatId);
+            }
+
             return Flux.concat(
                     Flux.just(StreamEventVO.progress(chatId, "正在生成图片...")),
                     Flux.defer(() -> {
@@ -247,7 +271,8 @@ public class PictureApp {
                                 aiResp.imagePrompt(), aiResp.style(), aiResp.dimensions());
                         ChatResponseVO data = ChatResponseVO.imageGenerated(chatId,
                                 genResult.imageUrl(), genResult.imageBase64(), aiResp.message(),
-                                aiResp.imagePrompt(), aiResp.style(), aiResp.dimensions(), aiResp.revisedPrompt());
+                                aiResp.imagePrompt(), aiResp.style(), aiResp.dimensions(), aiResp.revisedPrompt(),
+                                ragDebugData);
                         return Flux.just(StreamEventVO.done(chatId, data));
                     })
             );
@@ -349,23 +374,6 @@ public class PictureApp {
             return trimmed.substring(comma + 1);
         }
         return trimmed;
-    }
-
-    private String augmentWithKnowledge(String query) {
-        List<KnowledgeAsset> refs = knowledgeService.semanticSearch(query, 5);
-        if (refs.isEmpty()) {
-            log.info("[RAG] 无匹配知识库条目 query={}", query);
-            return query;
-        }
-        log.info("[RAG] 检索到 {} 条参考:\n{}",
-                refs.size(),
-                refs.stream().map(a -> "  - [" + a.title() + "] " + a.description()).collect(java.util.stream.Collectors.joining("\n")));
-        String styleRefs = refs.stream()
-                .map(a -> "- " + a.description())
-                .collect(java.util.stream.Collectors.joining("\n"));
-        String augmented = "[参考风格]\n" + styleRefs + "\n[用户需求] " + query;
-        log.info("[RAG] 增强后 Prompt ({} 字符):\n{}", augmented.length(), augmented);
-        return augmented;
     }
 
     private ChatResponseVO parseStructuredOrFallback(String rawText, String chatId) {

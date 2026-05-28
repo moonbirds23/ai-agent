@@ -16,7 +16,8 @@ public record ChatResponseVO(
         @Schema(description = "建议尺寸，仅image_ready时有值") String dimensions,
         @Schema(description = "修订后prompt或图片分析详情") String revisedPrompt,
         @Schema(description = "生成的图片URL，仅image_generated时有值") String imageUrl,
-        @Schema(description = "生成的图片base64，仅image_generated时有值") String imageBase64
+        @Schema(description = "生成的图片base64，仅image_generated时有值") String imageBase64,
+        @Schema(description = "RAG增强调试信息") Object ragDebugInfo
 ) {
     public static ChatResponseVO objToVo(ImageAgentResponse ai, String chatId) {
         return new ChatResponseVO(
@@ -27,26 +28,33 @@ public record ChatResponseVO(
                 ai.style(),
                 ai.dimensions(),
                 ai.revisedPrompt(),
-                null, null
+                null, null,
+                null
         );
     }
 
     public static ChatResponseVO textOnly(String chatId, String text) {
-        return new ChatResponseVO(chatId, "chat", text, null, null, null, null, null, null);
+        return new ChatResponseVO(chatId, "chat", text, null, null, null, null, null, null, null);
     }
 
     public static ChatResponseVO imageGenerated(String chatId, String imageUrl, String imageBase64, String message) {
-        return imageGenerated(chatId, imageUrl, imageBase64, message, null, null, null, null);
+        return imageGenerated(chatId, imageUrl, imageBase64, message, null, null, null, null, null);
     }
 
     public static ChatResponseVO imageGenerated(String chatId, String imageUrl, String imageBase64, String message,
                                                 String imagePrompt, String style, String dimensions, String revisedPrompt) {
+        return imageGenerated(chatId, imageUrl, imageBase64, message, imagePrompt, style, dimensions, revisedPrompt, null);
+    }
+
+    public static ChatResponseVO imageGenerated(String chatId, String imageUrl, String imageBase64, String message,
+                                                String imagePrompt, String style, String dimensions, String revisedPrompt,
+                                                Object ragDebugInfo) {
         return new ChatResponseVO(chatId, "image_generated", message, imagePrompt, style, dimensions, revisedPrompt,
-                imageUrl, imageBase64);
+                imageUrl, imageBase64, ragDebugInfo);
     }
 
     public static ChatResponseVO imageAnalyzed(String chatId, VisionAnalysisResult result) {
         return new ChatResponseVO(chatId, "image_analyzed", result.message(), result.imagePrompt(),
-                result.style(), null, result.detailText(), null, null);
+                result.style(), null, result.detailText(), null, null, null);
     }
 }

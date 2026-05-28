@@ -2,6 +2,8 @@ package com.zzp.aiagent.model.dto.chat;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 
+import java.util.List;
+
 @Schema(description = "对话请求")
 public record ChatRequest(
         @Schema(description = "用户消息", example = "帮我生成一张冬日雪景图")
@@ -20,13 +22,34 @@ public record ChatRequest(
         String imageUrl,
 
         @Schema(description = "显式模式: chat=文本交流, image_analysis=图片分析, image_generation=图片生成", example = "chat")
-        String mode
+        String mode,
+
+        @Schema(description = "明确参考图ID列表")
+        List<Long> referencePictureIds,
+
+        @Schema(description = "启用/禁用图库RAG检索，默认true", example = "true")
+        Boolean useGalleryRag,
+
+        @Schema(description = "参考模式: overall/style/color/composition")
+        String referenceMode,
+
+        @Schema(description = "指定风格模板编码")
+        String styleTemplateCode,
+
+        @Schema(description = "生成的图片是否保存到图库", example = "false")
+        Boolean saveGeneratedToGallery
 ) {
     public static final String MODE_CHAT = "chat";
     public static final String MODE_IMAGE_ANALYSIS = "image_analysis";
     public static final String MODE_IMAGE_GENERATION = "image_generation";
 
+    // Backward-compatible 5-arg constructor (old code without mode / RAG fields)
     public ChatRequest(String message, String chatId, Boolean generationMode, String imageBase64, String imageUrl) {
-        this(message, chatId, generationMode, imageBase64, imageUrl, null);
+        this(message, chatId, generationMode, imageBase64, imageUrl, null, null, null, null, null, null);
+    }
+
+    // Backward-compatible 6-arg constructor (old code with mode but without RAG fields)
+    public ChatRequest(String message, String chatId, Boolean generationMode, String imageBase64, String imageUrl, String mode) {
+        this(message, chatId, generationMode, imageBase64, imageUrl, mode, null, null, null, null, null);
     }
 }

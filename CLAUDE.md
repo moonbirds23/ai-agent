@@ -41,7 +41,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 项目定位
 
-云图库 AI 图片生成助手。DeepSeek 负责文本理解和 Prompt 整理，智谱负责图片生成与本地图片视觉分析。已完成对话链路、Advisor 拦截链、图片生成展示/下载、图片分析 Prompt 提取；后续迁移融合到 Picture-Backend。
+云图库 AI 图片生成助手。全链路已切换智谱（`glm-4-flash` 文本 + `glm-4.5v` 视觉 + `embedding-2` 嵌入 + CogView 生图）。已完成对话链路、Advisor 拦截链、三层 RAG 增强（显式参考图 → 收藏图检索 → 风格模板兜底）、图库管理、图片 AI 画像、前端调试台。后续迁移融合到 Picture-Backend。
 
 **编码规范对齐 Picture-Backend**（`D:\code\java\Picture-Backend`），后续两个项目将代码迁移融合上线。
 
@@ -82,21 +82,36 @@ com.zzp.aiagent
   │     ├── BusinessException.java 统一业务异常
   │     └── GlobalExceptionHandler.java
   ├── image/            图片生成服务（接口 + Noop 占位）
-  │     ├── ImageGenerationService.java    接口
-  │     └── NoopImageGenerationService.java 默认空实现
   ├── model/
   │     ├── dto/        请求 DTO（按业务分子包）
-  │     │     ├── chat/ChatRequest.java     （含 generationMode/imageBase64/imageUrl）
+  │     │     ├── chat/ChatRequest.java     （含 RAG 字段：referencePictureIds/useGalleryRag/...）
   │     │     ├── image/ImageAgentResponse.java（AI 层结构化输出）
   │     │     ├── image/ImageGenerationResult.java
   │     │     └── memory/MessageRecord.java （含 mediaUrls）
   │     └── vo/         响应 VO
-  │           ├── ChatResponseVO.java       （含 imageUrl/imageBase64）
+  │           ├── ChatResponseVO.java       （含 ragDebugInfo Object 字段）
   │           └── StreamEventVO.java        （含 progress 事件）
-  ├── controller/       REST 接口
-  ├── app/              应用层（PictureApp，双路径分流）
+  ├── controller/       REST 接口（Chat/Gallery/Profile/Template/Health）
+  ├── app/              应用层（PictureApp，RAG 增强生图链路）
   ├── advisor/          Advisor 拦截链
-  └── memory/           会话记忆（RedisChatMemory，含 media 序列化）
+  ├── memory/           会话记忆（RedisChatMemory，含 media 序列化）
+  ├── gallery/          图库管理（单用户模式，JSON 文件存储）
+  │     ├── model/GalleryPicture.java     图片元数据 record
+  │     ├── GalleryService.java          上传/导入/分页/收藏/删除
+  │     └── JsonFileGalleryPictureRepository.java  → gallery-data/pictures.json
+  ├── profile/          图片 AI 画像
+  │     ├── model/PictureAiProfile.java  视觉分析结果 + indexText + vectorStatus
+  │     └── PictureAiProfileService.java 分析/索引/删除
+  ├── rag/              三层 RAG 增强
+  │     ├── model/RagContext.java        三层上下文对象
+  │     ├── ExplicitReferenceResolver.java  Layer 1 显式参考图解析
+  │     ├── GalleryRagRetriever.java       Layer 2 向量检索
+  │     ├── RagServiceImpl.java           Layer 3 模板兜底编排
+  │     └── PromptReferenceAssembler.java Prompt 装配 + 调试数据构建
+  ├── template/         系统风格模板
+  │     ├── model/StyleTemplate.java     模板 record
+  │     └── StyleTemplateService.java    关键词匹配
+  └── knowledge/        旧版知识库模块（V1，将被 gallery/profile/rag 替代）
 ```
 
 ### 核心分层规则
@@ -229,10 +244,16 @@ Advisor 内抛 `BusinessException` → `ExceptionGuardAdvisor`（order=MAX）兜
 | **系统 JDK 是 1.8** | 所有 Maven 命令必须加 `JAVA_HOME="D:/develop/java/JDK/jdk-21"`，否则编译失败 |
 | **adviseContext 不能传 null** | M6 强制非 null 校验，构造 AdvisedResponse 时必须有 `new HashMap<>()` |
 | **onErrorResume 顺序** | 流式异常处理必须 `.onErrorResume(BusinessException.class, ...)` 在前、`.onErrorResume(e -> ...)` 在后，否则子类被父类吞掉 |
-| **test profile 隔离** | AI 相关 Bean（PictureApp、ChatController、SpringAiAiInvoke）标注 `@Profile("!test")`，test profile 排除 `OpenAiAutoConfiguration` |
+| **test profile 隔离** | AI 相关 Bean（PictureApp、ChatController 等）标注 `@Profile("!test")`，test profile 排除 `OpenAiAutoConfiguration` |
 | **MessageAggregator 路径** | 不在 advisor 包下，全限定名 `org.springframework.ai.chat.model.MessageAggregator` |
-| **API Key 不入库** | 通过环境变量 `DEEPSEEK_API_KEY` + `application-local.yml`（gitignored）注入 |
+| **API Key 不入库** | 通过环境变量 `ZHIPU_API_KEY` + `application-local.yml`（gitignored）注入 |
 | **BaseResponse 反序列化** | 必须保留 `@NoArgsConstructor`，否则 Jackson 无法反序列化 |
+| **用户消息模板不要包含 JSON Schema** | `{outputFormat}` 在 user message 中被替换为 JSON Schema 后，Spring AI 的 StringTemplate4 会把 Schema 中的 `{}` 当模板语法解析崩溃。输出格式约束只能放在 system prompt 中 |
+| **SimpleVectorStore 内存持久化** | 向量在内存中，`@PreDestroy` 时才通过 `VectorStorePersistence` 写入 `kb-data/vector-store.json`。服务被 `taskkill` 强杀时数据丢失 |
+| **ImageIO 读不了 webp** | `javax.imageio.ImageIO` 不支持 webp 格式，`GalleryServiceImpl.upload()` 中的宽高检测对 webp 图片返回 0x0 |
+| **智谱 embedding-2 相似度偏低** | 语义相关内容余弦相似度通常 0.4~0.5，`GalleryRagRetriever.MIN_SCORE` 设 0.4 较为合理，0.65 过严会导致大量漏召回 |
+| **RAG Prompt 写入 ChatMemory** | 当前 RAG 增强后的完整 Prompt 通过 `chatClient.prompt().user()` 传入，会被 `MessageChatMemoryAdvisor` 自动存入记忆。方案设计要求"RAG 上下文只作为本次调用临时 Prompt，不写入 ChatMemory"，当前违反此约束 |
+| **新旧模块共存** | `knowledge/`（V1，`kb-data/`）和 `gallery/profile/rag`（V2，`gallery-data/`）两套模块同时存在。V1 的 `KnowledgeService` 已从 PictureApp 移除但模块文件未删。VectorStore 由旧 `KnowledgeConfig` 创建，被新 `GalleryRagRetriever` 和 `PictureAiProfileService` 共用 |
 
 ## 多模态架构
 
@@ -292,7 +313,7 @@ public interface ImageGenerationService {
 
 ## 当前进度
 
-- [x] DeepSeek 对话对接（Spring AI OpenAI Starter）
+- [x] 智谱全链路切换（`glm-4-flash` 文本 + `glm-4.5v` 视觉 + `embedding-2` 嵌入 + CogView 生图）
 - [x] Advisor 拦截链（4 个自定义 + 1 个内置）
 - [x] 多轮对话（InMemoryChatMemory + MessageChatMemoryAdvisor）
 - [x] 流式 SSE + 非流式双接口（均为 POST + @RequestBody）
@@ -303,6 +324,16 @@ public interface ImageGenerationService {
 - [x] 多模态支持（图片输入 + 生成模式分流 + 前端 toggle）
 - [x] 图片校验（ContentGuard 扩展：数量/大小/格式）
 - [x] ChatMemory 支持 media（MessageRecord.mediaUrls + RedisChatMemory 序列化）
-- [x] 单元测试 70 个
+- [x] 图库管理（上传/URL导入/分页/收藏/删除，JSON 文件存储到 gallery-data/）
+- [x] 图片 AI 画像（VisionAnalysis → indexText → SimpleVectorStore 索引）
+- [x] 三层 RAG 增强（显式参考图 → 收藏图检索 → 风格模板兜底）
+- [x] 系统风格模板（10 套预设，关键词匹配，`style-templates.yml`）
+- [x] 前端三栏调试台（图库管理/对话生图/参考调试面板）
+- [x] 向量持久化（SimpleVectorStore + kb-data/vector-store.json）
+- [x] 单元测试 87 个
+- [ ] `saveGeneratedToGallery` 实现（生图成功后保存到图库，当前只有 TODO）
+- [ ] `referenceMode` 实际应用（overall/style/color/composition 裁剪参考图字段）
+- [ ] RAG Prompt 不写入 ChatMemory（当前违反设计约束）
 - [ ] 真实生图 API 接入（DALL·E / SD，接口已预留）
 - [ ] 会话记忆持久化（当前 InMemory，重启丢失）
+- [ ] 旧 knowledge/ 模块清理（V1，已被 gallery/profile/rag 替代）

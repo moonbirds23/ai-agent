@@ -1,4 +1,7 @@
 spring:
+  config:
+    import:
+      - classpath:rag/style-templates.yml
   ai:
     openai:
       api-key: ${ZHIPU_API_KEY:}
@@ -25,6 +28,14 @@ spring:
           min-idle: 1
   application:
     name: aiagent
+
+app:
+  rag:
+    enabled: true
+    top-k: 5
+    min-score: 0.65
+    max-context-chars: 2500
+    retrieve-favorites-only: true
 
 zhipu:
   api-key: ${ZHIPU_API_KEY:}

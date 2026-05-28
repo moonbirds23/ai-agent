@@ -3,7 +3,8 @@ package com.zzp.aiagent.app;
 import com.zzp.aiagent.common.PromptTemplate;
 import com.zzp.aiagent.image.ImageGenerationService;
 import com.zzp.aiagent.image.VisionAnalysisService;
-import com.zzp.aiagent.knowledge.KnowledgeService;
+import com.zzp.aiagent.rag.PromptReferenceAssembler;
+import com.zzp.aiagent.rag.RagService;
 import com.zzp.aiagent.model.dto.chat.ChatRequest;
 import com.zzp.aiagent.model.vo.ChatResponseVO;
 import org.junit.jupiter.api.BeforeEach;
@@ -21,7 +22,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -47,10 +47,12 @@ class PictureAppMultiTurnTest {
     @BeforeEach
     void setUp() {
         chatModel = mock(ChatModel.class);
-        KnowledgeService knowledgeService = mock(KnowledgeService.class);
-        when(knowledgeService.semanticSearch(any(), anyInt())).thenReturn(List.of());
+        RagService ragService = mock(RagService.class);
+        when(ragService.buildContext(any())).thenReturn(com.zzp.aiagent.rag.model.RagContext.empty());
+        PromptReferenceAssembler assembler = mock(PromptReferenceAssembler.class);
+        when(assembler.assemble(any(), any())).thenAnswer(inv -> inv.getArgument(0));
         pictureApp = new PictureApp(chatModel, new InMemoryChatMemory(), new PromptTemplate(),
-                mock(ImageGenerationService.class), mock(VisionAnalysisService.class), knowledgeService);
+                mock(ImageGenerationService.class), mock(VisionAnalysisService.class), ragService, assembler);
     }
 
     private static ChatRequest req(String message) {

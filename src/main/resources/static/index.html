@@ -3,140 +3,417 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>云图库 AI 助手</title>
+<title>云图库 AI 助手 — 调试台</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
-body{font:16px/1.6 'Microsoft YaHei',sans-serif;background:#f0f2f5;display:flex;justify-content:center;height:100vh}
-#app{width:100%;max-width:800px;display:flex;flex-direction:column;background:#fff;box-shadow:0 2px 12px rgba(0,0,0,.08)}
-#header{padding:16px 20px;border-bottom:1px solid #eee;font-size:18px;font-weight:600;color:#333;display:flex;align-items:center;gap:12px}
-#header span{flex:1}
-#mode-toggle{display:flex;align-items:center;gap:6px;font-size:13px;font-weight:400;cursor:pointer;user-select:none}
-#mode-toggle input{display:none}
-.toggle-track{width:44px;height:24px;background:#d9d9d9;border-radius:12px;position:relative;transition:background .2s}
-.toggle-track.on{background:#1890ff}
-.toggle-track::after{content:'';position:absolute;top:2px;left:2px;width:20px;height:20px;background:#fff;border-radius:50%;transition:transform .2s}
-.toggle-track.on::after{transform:translateX(20px)}
-#messages{flex:1;overflow-y:auto;padding:20px;display:flex;flex-direction:column;gap:12px}
-.bubble{max-width:85%;padding:10px 14px;border-radius:12px;line-height:1.5;word-break:break-word;white-space:pre-wrap}
+body{font:14px/1.5 'Microsoft YaHei',sans-serif;background:#e8ecf1;display:flex;justify-content:center;height:100vh;overflow:hidden}
+#app{width:100%;height:100vh;display:flex;flex-direction:column;background:#e8ecf1}
+
+/* ====== Header ====== */
+#header{padding:10px 16px;background:#fff;border-bottom:1px solid #e0e0e0;display:flex;align-items:center;gap:12px;flex-shrink:0}
+#header .title{flex:1;font-size:16px;font-weight:600;color:#1a1a2e;display:flex;align-items:center;gap:8px}
+#header .title .badge{font-size:11px;padding:1px 8px;background:#e6f4ff;color:#1890ff;border-radius:10px;font-weight:400}
+#header button.new-session{padding:5px 14px;background:#fff;border:1px solid #d9d9d9;border-radius:6px;font-size:13px;cursor:pointer;color:#555}
+#header button.new-session:hover{border-color:#1890ff;color:#1890ff}
+#chatId-hint{font-size:11px;color:#bbb;font-family:monospace}
+
+/* ====== 3-column body ====== */
+#body{flex:1;display:grid;grid-template-columns:300px 1fr 300px;overflow:hidden;gap:0}
+@media(max-width:1100px){#body{grid-template-columns:260px 1fr 260px}}
+@media(max-width:900px){#body{grid-template-columns:1fr;grid-template-rows:auto 1fr auto}}
+#body>*{overflow-y:auto;overflow-x:hidden}
+
+/* ====== Panels ====== */
+.panel{background:#fff;display:flex;flex-direction:column;overflow:hidden}
+.panel.left{border-right:1px solid #e8e8e8}
+.panel.right{border-left:1px solid #e8e8e8;background:#f8f9fb}
+.panel-header{padding:10px 14px;border-bottom:1px solid #f0f0f0;font-size:13px;font-weight:600;color:#555;display:flex;align-items:center;gap:6px;flex-shrink:0}
+.panel-header .icon{font-size:14px}
+.panel-body{flex:1;overflow-y:auto;overflow-x:hidden;padding:10px}
+
+/* ====== Gallery panel ====== */
+.gallery-actions{display:flex;gap:6px;padding:0 0 10px;flex-wrap:wrap}
+.gallery-actions button{padding:5px 10px;border:1px solid #d9d9d9;background:#fff;border-radius:5px;font-size:12px;cursor:pointer;color:#555;white-space:nowrap}
+.gallery-actions button:hover{border-color:#1890ff;color:#1890ff}
+.gallery-actions button.primary{background:#1890ff;color:#fff;border-color:#1890ff}
+.gallery-actions button.primary:hover{background:#40a9ff}
+.gallery-actions input[type=text]{flex:1;min-width:100px;padding:5px 8px;border:1px solid #d9d9d9;border-radius:5px;font-size:12px;outline:none}
+.gallery-actions input[type=text]:focus{border-color:#1890ff}
+.gallery-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+@media(max-width:1100px){.gallery-grid{grid-template-columns:repeat(2,1fr)}}
+.gallery-card{position:relative;border:2px solid transparent;border-radius:8px;overflow:hidden;cursor:pointer;background:#fafafa;transition:border-color .15s}
+.gallery-card:hover{border-color:#b3d8ff}
+.gallery-card.selected{border-color:#1890ff;box-shadow:0 0 0 1px #1890ff}
+.gallery-card img{width:100%;aspect-ratio:1;object-fit:cover;display:block}
+.gallery-card .meta{padding:4px 6px}
+.gallery-card .name{font-size:11px;color:#333;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.gallery-card .row{display:flex;align-items:center;justify-content:space-between;margin-top:2px}
+.gallery-card .star{cursor:pointer;font-size:13px;user-select:none}
+.gallery-card .star.fav{color:#faad14}
+.gallery-card .star:not(.fav){color:#ccc}
+.gallery-card .analyze{font-size:10px;color:#1890ff;cursor:pointer;text-decoration:underline}
+.gallery-card .analyze:hover{color:#40a9ff}
+.gallery-card .overlay{position:absolute;top:4px;right:4px;width:18px;height:18px;border-radius:3px;background:rgba(255,255,255,.9);display:flex;align-items:center;justify-content:center;font-size:11px;color:#1890ff;opacity:0;transition:opacity .15s}
+.gallery-card.selected .overlay,.gallery-card:hover .overlay{opacity:1}
+
+/* ====== Modal ====== */
+.modal-mask{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:100}
+.modal-box{background:#fff;border-radius:10px;padding:20px 24px;min-width:320px;max-width:420px;box-shadow:0 4px 20px rgba(0,0,0,.12)}
+.modal-box h3{font-size:15px;margin-bottom:14px;color:#333}
+.modal-box label{display:block;font-size:12px;color:#888;margin-bottom:4px;margin-top:10px}
+.modal-box input,.modal-box textarea{width:100%;padding:7px 10px;border:1px solid #d9d9d9;border-radius:6px;font-size:13px;outline:none;font-family:inherit}
+.modal-box textarea{height:60px;resize:vertical}
+.modal-box input:focus,.modal-box textarea:focus{border-color:#1890ff}
+.modal-box .btns{margin-top:16px;display:flex;gap:10px;justify-content:flex-end}
+.modal-box .btns button{padding:6px 16px;border-radius:6px;font-size:13px;cursor:pointer;border:1px solid #d9d9d9;background:#fff;color:#555}
+.modal-box .btns button.ok{background:#1890ff;color:#fff;border-color:#1890ff}
+.modal-box .btns button.ok:hover{background:#40a9ff}
+
+/* ====== Chat panel ====== */
+#messages{flex:1;overflow-y:auto;padding:16px 20px;display:flex;flex-direction:column;gap:10px}
+.bubble{max-width:85%;padding:10px 14px;border-radius:12px;line-height:1.5;word-break:break-word;white-space:pre-wrap;font-size:14px}
 .bubble.user{align-self:flex-end;background:#1890ff;color:#fff;border-bottom-right-radius:4px}
 .bubble.assistant{align-self:flex-start;background:#f5f5f5;color:#333;border-bottom-left-radius:4px}
-.bubble.error{align-self:center;background:#fff2f0;color:#ff4d4f;border:1px solid #ffccc7;font-size:14px}
+.bubble.error{align-self:center;background:#fff2f0;color:#ff4d4f;border:1px solid #ffccc7;font-size:13px}
 .bubble img{max-width:100%;border-radius:8px;margin-top:8px}
-.image-actions{margin-top:8px;display:flex;gap:8px}
-.image-actions button{padding:6px 12px;border:1px solid #1890ff;background:#fff;color:#1890ff;border-radius:6px;cursor:pointer;font-size:13px}
+.image-actions{margin-top:8px;display:flex;gap:8px;flex-wrap:wrap}
+.image-actions button{padding:4px 10px;border:1px solid #1890ff;background:#fff;color:#1890ff;border-radius:6px;cursor:pointer;font-size:12px}
 .image-actions button:hover{background:#e6f4ff}
-.prompt-detail{margin-top:10px;border-top:1px solid #e8e8e8;padding-top:8px;font-size:13px;color:#555}
-.prompt-detail summary{cursor:pointer;color:#1890ff;user-select:none}
-.prompt-detail pre{margin-top:8px;white-space:pre-wrap;word-break:break-word;font-family:inherit;line-height:1.5}
-#chatId-hint{font-size:11px;color:#bbb;text-align:right;padding:4px 20px;font-family:monospace}
-#input-area{display:flex;gap:10px;padding:16px 20px;border-top:1px solid #eee;align-items:flex-end}
-#preview-area{display:none;padding:4px 20px 0;position:relative}
-#preview-area img{max-width:120px;max-height:120px;border-radius:8px;border:1px solid #eee}
-#preview-area .remove{position:absolute;top:6px;left:128px;background:#ff4d4f;color:#fff;border:none;border-radius:50%;width:20px;height:20px;font-size:12px;cursor:pointer;line-height:1}
-#analyze-image{margin-left:16px;vertical-align:top;padding:6px 12px;border:1px solid #1890ff;background:#fff;color:#1890ff;border-radius:6px;cursor:pointer;font-size:13px}
-#analyze-image:hover{background:#e6f4ff}#analyze-image:disabled{border-color:#d9d9d9;color:#aaa;cursor:not-allowed;background:#fff}
-#image-upload{width:36px;height:36px;border:1px dashed #d9d9d9;border-radius:8px;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:20px;flex-shrink:0}
+.prompt-detail{margin-top:10px;border-top:1px solid #e8e8e8;padding-top:8px;font-size:12px;color:#666}
+.prompt-detail summary{cursor:pointer;color:#1890ff;user-select:none;font-size:13px}
+.prompt-detail pre{margin-top:6px;white-space:pre-wrap;word-break:break-word;font-family:inherit;line-height:1.5;background:#fafafa;padding:8px;border-radius:4px}
+
+/* ====== Mode tabs ====== */
+#mode-tabs{display:flex;gap:0;padding:0 20px;border-bottom:1px solid #f0f0f0;flex-shrink:0}
+#mode-tabs .tab{padding:8px 16px;font-size:13px;cursor:pointer;color:#888;border-bottom:2px solid transparent;transition:all .15s;background:none;border-top:none;border-left:none;border-right:none;font-family:inherit}
+#mode-tabs .tab:hover{color:#1890ff}
+#mode-tabs .tab.active{color:#1890ff;border-bottom-color:#1890ff;font-weight:600}
+
+/* ====== Input area ====== */
+#input-area{display:flex;gap:8px;padding:12px 20px;border-top:1px solid #eee;align-items:flex-end;flex-shrink:0}
+#preview-area{display:none;padding:4px 20px 0;position:relative;flex-shrink:0}
+#preview-area img{max-width:100px;max-height:100px;border-radius:8px;border:1px solid #eee}
+#preview-area .remove{position:absolute;top:5px;left:108px;background:#ff4d4f;color:#fff;border:none;border-radius:50%;width:18px;height:18px;font-size:11px;cursor:pointer;line-height:1}
+#image-upload{width:34px;height:34px;border:1px dashed #d9d9d9;border-radius:8px;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:18px;flex-shrink:0;color:#999}
 #image-upload:hover{border-color:#1890ff;color:#1890ff}
 #image-input{display:none}
-#input{flex:1;padding:10px 14px;border:1px solid #d9d9d9;border-radius:8px;font-size:15px;outline:none;resize:none}
-#input:focus{border-color:#1890ff;box-shadow:0 0 0 2px rgba(24,144,255,.15)}
-#send{padding:10px 24px;background:#1890ff;color:#fff;border:none;border-radius:8px;font-size:15px;cursor:pointer;white-space:nowrap}
+#input{flex:1;padding:9px 12px;border:1px solid #d9d9d9;border-radius:8px;font-size:14px;outline:none;resize:none;font-family:inherit;min-height:38px;max-height:120px}
+#input:focus{border-color:#1890ff;box-shadow:0 0 0 2px rgba(24,144,255,.12)}
+#send{padding:9px 20px;background:#1890ff;color:#fff;border:none;border-radius:8px;font-size:14px;cursor:pointer;white-space:nowrap;flex-shrink:0}
 #send:hover{background:#40a9ff}#send:disabled{background:#d9d9d9;cursor:not-allowed}
-#progress-bar{display:none;height:3px;background:#1890ff;width:100%}
+#progress-bar{display:none;height:2px;background:#1890ff;width:100%;flex-shrink:0;transition:width .3s}
+
+/* ====== Right panel ====== */
+.right-section{margin-bottom:16px}
+.right-section .sec-title{font-size:12px;font-weight:600;color:#888;margin-bottom:8px;display:flex;align-items:center;gap:4px;text-transform:uppercase;letter-spacing:.5px}
+.ref-list{display:flex;flex-wrap:wrap;gap:6px;min-height:40px}
+.ref-item{position:relative;width:64px;height:64px;border-radius:6px;overflow:hidden;border:2px solid #1890ff}
+.ref-item img{width:100%;height:100%;object-fit:cover}
+.ref-item .del{position:absolute;top:2px;right:2px;width:16px;height:16px;background:rgba(0,0,0,.5);color:#fff;border:none;border-radius:50%;font-size:10px;cursor:pointer;display:flex;align-items:center;justify-content:center;line-height:1}
+.ref-empty{font-size:11px;color:#bbb;padding:8px 0}
+.rag-retrieved{display:flex;flex-wrap:wrap;gap:6px}
+.rag-card{width:72px;text-align:center}
+.rag-card img{width:72px;height:72px;object-fit:cover;border-radius:6px;border:1px solid #e8e8e8;display:block}
+.rag-card .score{font-size:10px;color:#888;margin-top:2px}
+.toggle-row{display:flex;align-items:center;justify-content:space-between;padding:4px 0}
+.toggle-row .lbl{font-size:13px;color:#333}
+.toggle-row .sublbl{font-size:11px;color:#999;margin-left:4px}
+.toggle-switch{position:relative;width:40px;height:22px;border-radius:11px;background:#d9d9d9;cursor:pointer;transition:background .2s;flex-shrink:0}
+.toggle-switch.on{background:#1890ff}
+.toggle-switch::after{content:'';position:absolute;top:2px;left:2px;width:18px;height:18px;background:#fff;border-radius:50%;transition:transform .2s}
+.toggle-switch.on::after{transform:translateX(18px)}
+select, .right-select{width:100%;padding:6px 8px;border:1px solid #d9d9d9;border-radius:6px;font-size:12px;outline:none;background:#fff;color:#333}
+select:focus,.right-select:focus{border-color:#1890ff}
+.debug-block{border:1px solid #e8e8e8;border-radius:6px;overflow:hidden;margin-top:4px}
+.debug-block summary{padding:6px 10px;background:#f5f5f5;font-size:12px;color:#555;cursor:pointer;user-select:none}
+.debug-block summary:hover{background:#eee}
+.debug-block pre{padding:10px;font-size:11px;line-height:1.5;white-space:pre-wrap;word-break:break-word;font-family:'Consolas','Courier New',monospace;max-height:200px;overflow-y:auto;color:#333;background:#fff}
+
+/* ====== Inline upload modal ====== */
+.inline-form{padding:8px;background:#fafafa;border-radius:6px;margin-bottom:8px;display:none}
+.inline-form.show{display:block}
+.inline-form input,.inline-form textarea{width:100%;padding:5px 8px;border:1px solid #d9d9d9;border-radius:4px;font-size:12px;margin-top:4px;font-family:inherit;outline:none}
+.inline-form textarea{height:40px;resize:vertical}
+.inline-form .row{display:flex;gap:6px;margin-top:6px}
+.inline-form .row button{padding:4px 12px;border-radius:4px;font-size:12px;cursor:pointer;border:1px solid #d9d9d9;background:#fff}
+.inline-form .row button.confirm{background:#1890ff;color:#fff;border-color:#1890ff}
+
+/* ====== Misc ====== */
+.placeholder{font-size:11px;color:#bbb;padding:12px 0;text-align:center}
+.gallery-loading{font-size:12px;color:#999;text-align:center;padding:20px}
+.toast{position:fixed;top:20px;right:20px;background:#333;color:#fff;padding:8px 16px;border-radius:6px;font-size:13px;z-index:200;opacity:0;transition:opacity .2s}
+.toast.show{opacity:1}
+::-webkit-scrollbar{width:5px}
+::-webkit-scrollbar-thumb{background:#ccc;border-radius:3px}
 </style>
 </head>
 <body>
 <div id="app">
+  <!-- ========== HEADER ========== -->
   <div id="header">
-    <span>云图库 AI 图片生成助手</span>
-    <label id="mode-toggle" title="开启后基于历史对话生成图片">
-      <input type="checkbox" id="gen-mode" onchange="onModeChange()">
-      <span class="toggle-track" id="toggle-track"></span>
-      <span id="mode-label">生成模式</span>
-    </label>
-    <button onclick="newSession()" style="padding:4px 12px;background:none;border:1px solid #d9d9d9;border-radius:6px;font-size:13px;cursor:pointer;color:#666">+ 新对话</button>
+    <div class="title">云图库 AI 助手 <span class="badge">调试台</span></div>
+    <span id="chatId-hint"></span>
+    <button class="new-session" onclick="newSession()">+ 新对话</button>
   </div>
-  <div id="progress-bar"></div>
-  <div id="chatId-hint"></div>
-  <div id="messages">
-    <div class="bubble assistant">你好，我是AI图片生成助手。描述你想要的图片，我来帮你生成。</div>
+
+  <!-- ========== 3-COLUMN BODY ========== -->
+  <div id="body">
+    <!-- ===== LEFT: Gallery ===== -->
+    <div class="panel left" id="left-panel">
+      <div class="panel-header"><span class="icon">&#128247;</span> 图库</div>
+      <div class="panel-body" id="gallery-body">
+        <div class="gallery-actions">
+          <button onclick="showUploadForm()" class="primary">上传图片</button>
+          <button onclick="showImportDialog()">URL导入</button>
+          <input type="text" id="gallery-search" placeholder="搜索..." onkeydown="if(event.key==='Enter')loadGallery()">
+          <button onclick="loadGallery()" style="flex-shrink:0">搜索</button>
+        </div>
+
+        <div class="inline-form" id="upload-form">
+          <div class="row" style="margin-top:0">
+            <button onclick="triggerFilePicker()">选择文件</button>
+            <span id="upload-file-name" style="font-size:11px;color:#888;line-height:28px">未选择文件</span>
+          </div>
+          <input type="text" id="upload-name" placeholder="图片名称（可选）">
+          <input type="text" id="upload-category" placeholder="分类（可选，如: 风景, 人物）">
+          <input type="text" id="upload-tags" placeholder="标签（可选，逗号分隔）">
+          <div class="row">
+            <button class="confirm" onclick="doUpload()">确认上传</button>
+            <button onclick="hideUploadForm()">取消</button>
+          </div>
+        </div>
+
+        <input type="file" id="hidden-file-input" accept="image/png,image/jpeg,image/jpg,image/webp,image/gif" style="display:none" onchange="onUploadFileSelect(event)">
+
+        <div class="gallery-grid" id="gallery-grid">
+          <div class="gallery-loading">加载中...</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== CENTER: Chat ===== -->
+    <div class="panel" id="center-panel">
+      <div id="mode-tabs">
+        <button class="tab active" data-mode="chat" onclick="switchMode('chat')">聊天</button>
+        <button class="tab" data-mode="image_analysis" onclick="switchMode('image_analysis')">图片分析</button>
+        <button class="tab" data-mode="image_generation" onclick="switchMode('image_generation')">图片生成</button>
+      </div>
+      <div id="progress-bar"></div>
+      <div id="messages">
+        <div class="bubble assistant">你好，我是AI图片生成助手。描述你想要的图片，我来帮你生成。</div>
+      </div>
+      <div id="preview-area">
+        <img id="preview-img" src="" alt="预览">
+        <button class="remove" onclick="clearImage()">&times;</button>
+      </div>
+      <div id="input-area">
+        <label id="image-upload" title="上传图片分析/参考">
+          &#128247;
+          <input type="file" id="image-input" accept="image/png,image/jpeg,image/jpg,image/webp,image/gif" onchange="onChatImageSelect(event)">
+        </label>
+        <textarea id="input" placeholder="描述你想要的图片..." rows="1"></textarea>
+        <button id="send" onclick="send()">发送</button>
+      </div>
+    </div>
+
+    <!-- ===== RIGHT: Reference & Debug ===== -->
+    <div class="panel right" id="right-panel">
+      <div class="panel-header"><span class="icon">&#9881;</span> 参考与调试</div>
+      <div class="panel-body" id="debug-body">
+
+        <!-- Explicit references -->
+        <div class="right-section">
+          <div class="sec-title">显式参考图</div>
+          <div class="ref-list" id="ref-list">
+            <div class="ref-empty">从左侧图库点击图片添加参考</div>
+          </div>
+          <div style="margin-top:6px">
+            <select id="reference-mode" class="right-select">
+              <option value="COMPREHENSIVE">综合参考</option>
+              <option value="STYLE">参考风格</option>
+              <option value="COLOR">参考色彩</option>
+              <option value="COMPOSITION">参考构图</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- RAG settings -->
+        <div class="right-section">
+          <div class="sec-title">RAG 设置</div>
+          <div class="toggle-row">
+            <span class="lbl">启用历史收藏图检索<span class="sublbl">useGalleryRag</span></span>
+            <div class="toggle-switch on" id="rag-toggle" onclick="toggleRag()"></div>
+          </div>
+          <div class="toggle-row" style="margin-top:4px">
+            <span class="lbl">生成后保存到图库<span class="sublbl">saveGeneratedToGallery</span></span>
+            <div class="toggle-switch" id="save-toggle" onclick="toggleSave()"></div>
+          </div>
+        </div>
+
+        <!-- Style template -->
+        <div class="right-section">
+          <div class="sec-title">风格模板</div>
+          <select id="template-select" class="right-select">
+            <option value="">自动匹配</option>
+          </select>
+        </div>
+
+        <!-- RAG retrieved results -->
+        <div class="right-section" id="rag-results-section" style="display:none">
+          <div class="sec-title">RAG 召回结果</div>
+          <div class="rag-retrieved" id="rag-retrieved"></div>
+        </div>
+
+        <!-- Matched template -->
+        <div class="right-section" id="matched-template-section" style="display:none">
+          <div class="sec-title">命中模板</div>
+          <div id="matched-template-info" style="font-size:12px;color:#555"></div>
+        </div>
+
+        <!-- Final enhanced prompt -->
+        <div class="right-section" id="debug-prompt-section" style="display:none">
+          <div class="sec-title">最终增强 Prompt</div>
+          <details class="debug-block" id="debug-prompt-block">
+            <summary>点击展开最终 Prompt</summary>
+            <pre id="debug-prompt-text"></pre>
+          </details>
+        </div>
+
+      </div>
+    </div>
   </div>
-  <div id="preview-area">
-    <img id="preview-img" src="" alt="预览">
-    <button class="remove" onclick="clearImage()">&times;</button>
-    <button id="analyze-image" onclick="analyzeImage()">分析图片</button>
-  </div>
-  <div id="input-area">
-    <label id="image-upload" title="上传图片">
-      &#128247;
-      <input type="file" id="image-input" accept="image/png,image/jpeg,image/jpg,image/webp,image/gif" onchange="onImageSelect(event)">
-    </label>
-    <input id="input" placeholder="描述你想要的图片..." autofocus>
-    <button id="send" onclick="send()">发送</button>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<!-- Modal for URL import -->
+<div class="modal-mask" id="import-modal" style="display:none">
+  <div class="modal-box">
+    <h3>URL 导入图片</h3>
+    <label>图片URL</label>
+    <input type="text" id="import-url-input" placeholder="https://example.com/image.jpg">
+    <label>名称（可选）</label>
+    <input type="text" id="import-name-input" placeholder="图片名称">
+    <label>分类（可选）</label>
+    <input type="text" id="import-category-input" placeholder="如: 风景, 人物">
+    <label>标签（可选，逗号分隔）</label>
+    <input type="text" id="import-tags-input" placeholder="如: 唯美, 自然">
+    <div class="btns">
+      <button onclick="hideImportDialog()">取消</button>
+      <button class="ok" onclick="doImportUrl()">导入</button>
+    </div>
   </div>
 </div>
 
 <script>
-const messages = document.getElementById('messages');
-const input = document.getElementById('input');
-const sendBtn = document.getElementById('send');
-const hint = document.getElementById('chatId-hint');
-const genMode = document.getElementById('gen-mode');
-const toggleTrack = document.getElementById('toggle-track');
-const modeLabel = document.getElementById('mode-label');
-const previewArea = document.getElementById('preview-area');
-const previewImg = document.getElementById('preview-img');
-const progressBar = document.getElementById('progress-bar');
-const analyzeBtn = document.getElementById('analyze-image');
+/* ====== STATE ====== */
 let chatId = null;
 let sending = false;
-let imageBase64 = null;
+let chatImageBase64 = null;
+let currentMode = 'chat';
+let selectedReferences = [];   // array of GalleryPicture ids
+let galleryPictures = [];      // loaded gallery pictures cache
+let useGalleryRag = true;
+let saveGeneratedToGallery = false;
+let uploadFileBase64 = null;
+let templates = [];
+const MSG = document.getElementById('messages');
+const INPUT = document.getElementById('input');
+const SEND_BTN = document.getElementById('send');
+const HINT = document.getElementById('chatId-hint');
+const PROGRESS = document.getElementById('progress-bar');
+const PREVIEW_AREA = document.getElementById('preview-area');
+const PREVIEW_IMG = document.getElementById('preview-img');
 
-input.addEventListener('keydown', e => { if(e.key==='Enter' && !sending) send(); });
+/* ====== INIT ====== */
+window.onload = () => {
+  loadGallery();
+  loadTemplates();
+};
 
+INPUT.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey && !sending) {
+    e.preventDefault();
+    send();
+  }
+});
+// Auto-resize textarea
+INPUT.addEventListener('input', () => {
+  INPUT.style.height = 'auto';
+  INPUT.style.height = Math.min(INPUT.scrollHeight, 120) + 'px';
+});
+
+/* ====== TOAST ====== */
+function toast(msg, ms) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(el._tid);
+  el._tid = setTimeout(() => el.classList.remove('show'), ms || 2500);
+}
+
+/* ====== MODE ====== */
+function switchMode(mode) {
+  currentMode = mode;
+  document.querySelectorAll('#mode-tabs .tab').forEach(t => t.classList.remove('active'));
+  document.querySelector('#mode-tabs .tab[data-mode="' + mode + '"]').classList.add('active');
+  // Show file upload hint for image modes
+  const uploadLabel = document.getElementById('image-upload');
+  if (mode === 'image_analysis') {
+    uploadLabel.style.borderColor = '#1890ff';
+    uploadLabel.style.color = '#1890ff';
+  } else {
+    uploadLabel.style.borderColor = '#d9d9d9';
+    uploadLabel.style.color = '#999';
+  }
+  if (mode === 'image_generation') {
+    INPUT.placeholder = '描述你想要生成的图片...';
+  } else if (mode === 'image_analysis') {
+    INPUT.placeholder = '上传图片后点击发送，或输入补充描述...';
+  } else {
+    INPUT.placeholder = '输入消息...';
+  }
+}
+
+/* ====== CHAT ====== */
 function setChatId(id) {
   chatId = id;
-  hint.textContent = id ? '会话 ' + id.substring(0,8) : '';
+  HINT.textContent = id ? '会话 ' + id.substring(0, 8) : '';
 }
 
 function newSession() {
   setChatId(null);
-  messages.innerHTML = '<div class="bubble assistant">你好，我是AI图片生成助手。描述你想要的图片，我来帮你生成。</div>';
+  MSG.innerHTML = '<div class="bubble assistant">你好，我是AI图片生成助手。描述你想要的图片，我来帮你生成。</div>';
   clearImage();
 }
 
-function onModeChange() {
-  const on = genMode.checked;
-  toggleTrack.className = 'toggle-track' + (on ? ' on' : '');
-  modeLabel.textContent = on ? '生成模式(开)' : '生成模式';
-}
-
-function onImageSelect(e) {
+function onChatImageSelect(e) {
   const file = e.target.files[0];
   if (!file) return;
   const reader = new FileReader();
   reader.onload = () => {
-    imageBase64 = reader.result;
-    previewImg.src = reader.result;
-    previewArea.style.display = 'block';
+    chatImageBase64 = reader.result;
+    PREVIEW_IMG.src = reader.result;
+    PREVIEW_AREA.style.display = 'block';
   };
   reader.readAsDataURL(file);
 }
 
 function clearImage() {
-  imageBase64 = null;
-  previewImg.src = '';
-  previewArea.style.display = 'none';
+  chatImageBase64 = null;
+  PREVIEW_IMG.src = '';
+  PREVIEW_AREA.style.display = 'none';
   document.getElementById('image-input').value = '';
 }
 
 function addBubble(role, text, id) {
   const div = document.createElement('div');
   div.className = 'bubble ' + role;
-  if(id) div.id = id;
+  if (id) div.id = id;
   div.textContent = text;
-  messages.appendChild(div);
-  messages.scrollTop = messages.scrollHeight;
+  MSG.appendChild(div);
+  MSG.scrollTop = MSG.scrollHeight;
   return div;
 }
 
@@ -147,14 +424,19 @@ function showImage(data) {
   if (src) {
     const img = document.createElement('img');
     img.src = src;
-    img.onload = () => { messages.scrollTop = messages.scrollHeight; };
+    img.onload = () => { MSG.scrollTop = MSG.scrollHeight; };
     div.appendChild(img);
     if (data.imageUrl) {
       const actions = document.createElement('div');
       actions.className = 'image-actions';
       const downloadBtn = document.createElement('button');
       downloadBtn.textContent = '下载图片';
-      downloadBtn.onclick = () => window.open('/api/image/download?url=' + encodeURIComponent(data.imageUrl), '_blank');
+      downloadBtn.onclick = () => {
+        const a = document.createElement('a');
+        a.href = data.imageUrl;
+        a.download = 'generated-image';
+        a.click();
+      };
       actions.appendChild(downloadBtn);
       div.appendChild(actions);
     }
@@ -172,8 +454,8 @@ function showImage(data) {
       div.appendChild(details);
     }
   }
-  messages.appendChild(div);
-  messages.scrollTop = messages.scrollHeight;
+  MSG.appendChild(div);
+  MSG.scrollTop = MSG.scrollHeight;
 }
 
 function formatGeneratedPrompt(data) {
@@ -198,107 +480,479 @@ function formatChatData(data) {
 }
 
 function send() {
-  sendWithMode(genMode.checked ? 'image_generation' : 'chat');
-}
-
-function analyzeImage() {
-  sendWithMode('image_analysis');
-}
-
-async function sendWithMode(mode) {
-  const text = input.value.trim();
-  if(sending) return;
-  if(mode !== 'image_analysis' && !text) return;
-  if(mode === 'image_analysis' && !imageBase64) {
+  const text = INPUT.value.trim();
+  if (sending) return;
+  if (currentMode !== 'image_analysis' && !text) return;
+  if (currentMode === 'image_analysis' && !chatImageBase64) {
     addBubble('error', '请先上传需要分析的图片');
     return;
   }
+
   sending = true;
-  sendBtn.disabled = true;
-  analyzeBtn.disabled = true;
-  input.value = '';
-  input.focus();
+  SEND_BTN.disabled = true;
+  INPUT.value = '';
+  INPUT.style.height = 'auto';
+  INPUT.focus();
 
   const displayText = text || '分析这张图片';
   addBubble('user', displayText);
   const assistantBubble = addBubble('assistant', '', 'streaming');
   let fullText = '';
 
-  try {
-    const body = {
-      message: displayText,
-      chatId: chatId,
-      generationMode: mode === 'image_generation',
-      mode: mode,
-      imageBase64: imageBase64
-    };
-    const resp = await fetch('/api/chat/stream', {
-      method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify(body)
-    });
-    clearImage();
+  // Clear right panel debug sections for new request
+  clearDebugSections();
 
+  const body = {
+    message: displayText,
+    chatId: chatId,
+    generationMode: currentMode === 'image_generation',
+    mode: currentMode,
+    imageBase64: chatImageBase64 || null,
+    referencePictureIds: currentMode === 'image_generation' ? selectedReferences : [],
+    useGalleryRag: currentMode === 'image_generation' ? useGalleryRag : false,
+    referenceMode: currentMode === 'image_generation' ? document.getElementById('reference-mode').value : null,
+    styleTemplateCode: currentMode === 'image_generation' ? getSelectedTemplateCode() : null,
+    saveGeneratedToGallery: currentMode === 'image_generation' ? saveGeneratedToGallery : false
+  };
+
+  fetch('/api/chat/stream', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  }).then(async resp => {
+    clearImage();
     const reader = resp.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
 
-    while(true) {
-      const {done, value} = await reader.read();
-      if(done) break;
-      buffer += decoder.decode(value, {stream:true});
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
       const lines = buffer.split('\n');
       buffer = lines.pop() || '';
 
-      for(const line of lines) {
-        if(!line.startsWith('data:')) continue;
+      for (const line of lines) {
+        if (!line.startsWith('data:')) continue;
         try {
           const event = JSON.parse(line.slice(5).trim());
-          switch(event.type) {
-            case 'chatId':
-              setChatId(event.chatId);
-              break;
-            case 'token':
-              fullText += event.content;
-              assistantBubble.textContent = fullText;
-              messages.scrollTop = messages.scrollHeight;
-              break;
-            case 'done':
-              if (event.data) {
-                if (event.data.type === 'image_generated') {
-                  assistantBubble.remove();
-                  showImage(event.data);
-                } else {
-                  assistantBubble.textContent = formatChatData(event.data);
-                }
-              }
-              progressBar.style.display = 'none';
-              messages.scrollTop = messages.scrollHeight;
-              break;
-            case 'progress':
-              assistantBubble.textContent = event.content || '生成中...';
-              progressBar.style.display = 'block';
-              messages.scrollTop = messages.scrollHeight;
-              break;
-            case 'error':
-              assistantBubble.className = 'bubble error';
-              assistantBubble.textContent = event.content;
-              progressBar.style.display = 'none';
-              break;
-          }
-        } catch(e) { /* skip bad lines */ }
+          handleStreamEvent(event, assistantBubble, fullText);
+          if (event.type === 'token') fullText += event.content;
+        } catch (e) { /* skip bad lines */ }
       }
     }
-  } catch(e) {
+  }).catch(e => {
     assistantBubble.className = 'bubble error';
     assistantBubble.textContent = '网络异常，请重试';
-    progressBar.style.display = 'none';
-  } finally {
+    PROGRESS.style.display = 'none';
+  }).finally(() => {
     sending = false;
-    sendBtn.disabled = false;
-    analyzeBtn.disabled = false;
-    input.focus();
+    SEND_BTN.disabled = false;
+    INPUT.focus();
+  });
+}
+
+function handleStreamEvent(event, assistantBubble, fullText) {
+  switch (event.type) {
+    case 'chatId':
+      setChatId(event.chatId);
+      break;
+    case 'token':
+      assistantBubble.textContent = fullText + event.content;
+      MSG.scrollTop = MSG.scrollHeight;
+      break;
+    case 'done':
+      if (event.data) {
+        // Check for ragDebugInfo first
+        if (event.data.ragDebugInfo) {
+          showRagDebugInfo(event.data.ragDebugInfo);
+        }
+        if (event.data.type === 'image_generated') {
+          assistantBubble.remove();
+          showImage(event.data);
+        } else {
+          assistantBubble.textContent = formatChatData(event.data);
+        }
+      }
+      PROGRESS.style.display = 'none';
+      MSG.scrollTop = MSG.scrollHeight;
+      break;
+    case 'progress':
+      assistantBubble.textContent = event.content || '生成中...';
+      PROGRESS.style.display = 'block';
+      MSG.scrollTop = MSG.scrollHeight;
+      break;
+    case 'error':
+      assistantBubble.className = 'bubble error';
+      assistantBubble.textContent = event.content;
+      PROGRESS.style.display = 'none';
+      break;
   }
+}
+
+function clearDebugSections() {
+  document.getElementById('rag-results-section').style.display = 'none';
+  document.getElementById('rag-retrieved').innerHTML = '';
+  document.getElementById('matched-template-section').style.display = 'none';
+  document.getElementById('matched-template-info').textContent = '';
+  document.getElementById('debug-prompt-section').style.display = 'none';
+  document.getElementById('debug-prompt-text').textContent = '';
+}
+
+function getSelectedTemplateCode() {
+  const sel = document.getElementById('template-select');
+  return sel.value || null;
+}
+
+/* ====== GALLERY ====== */
+async function loadGallery() {
+  const grid = document.getElementById('gallery-grid');
+  grid.innerHTML = '<div class="gallery-loading">加载中...</div>';
+
+  const keyword = document.getElementById('gallery-search').value.trim();
+  let url = '/api/gallery/page?page=1&pageSize=60';
+  if (keyword) url += '&keyword=' + encodeURIComponent(keyword);
+
+  try {
+    const resp = await fetch(url);
+    const result = await resp.json();
+    if (result.code === 0 && result.data) {
+      galleryPictures = result.data;
+      renderGallery(result.data);
+    } else {
+      grid.innerHTML = '<div class="placeholder">加载失败: ' + (result.message || '未知错误') + '</div>';
+    }
+  } catch (e) {
+    grid.innerHTML = '<div class="placeholder">网络异常</div>';
+  }
+}
+
+function renderGallery(pictures) {
+  const grid = document.getElementById('gallery-grid');
+  if (!pictures || pictures.length === 0) {
+    grid.innerHTML = '<div class="placeholder">暂无图片，上传或导入添加</div>';
+    return;
+  }
+
+  grid.innerHTML = pictures.map(p => {
+    const isSelected = selectedReferences.includes(p.id);
+    const favClass = p.favorited ? 'fav' : '';
+    const imageUrl = '/api/gallery/files/' + p.id + '?t=' + (p.updateTime || '');
+    return `
+      <div class="gallery-card${isSelected ? ' selected' : ''}" data-id="${p.id}">
+        <img src="${imageUrl}" alt="${escAttr(p.name || '')}" loading="lazy"
+             onclick="selectReference(${p.id})">
+        <div class="overlay">${isSelected ? '&#10003;' : '&#9744;'}</div>
+        <div class="meta">
+          <div class="name" title="${escAttr(p.name || '未命名')}">${escHtml(p.name || '未命名')}</div>
+          <div class="row">
+            <span class="star${favClass ? ' ' + favClass : ''}" onclick="event.stopPropagation();toggleFavorite(${p.id})">${favClass ? '★' : '☆'}</span>
+            <span class="analyze" onclick="event.stopPropagation();analyzePicture(${p.id})">分析</span>
+          </div>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+function selectReference(id) {
+  const idx = selectedReferences.indexOf(id);
+  if (idx >= 0) {
+    selectedReferences.splice(idx, 1);
+  } else {
+    selectedReferences.push(id);
+  }
+  // Re-render gallery to update selection state
+  renderGallery(galleryPictures);
+  // Update right panel reference list
+  renderRefList();
+}
+
+function removeReference(id) {
+  const idx = selectedReferences.indexOf(id);
+  if (idx >= 0) selectedReferences.splice(idx, 1);
+  renderGallery(galleryPictures);
+  renderRefList();
+}
+
+function renderRefList() {
+  const container = document.getElementById('ref-list');
+  if (selectedReferences.length === 0) {
+    container.innerHTML = '<div class="ref-empty">从左侧图库点击图片添加参考</div>';
+    return;
+  }
+  container.innerHTML = selectedReferences.map(id => {
+    const p = galleryPictures.find(g => g.id === id);
+    if (!p) return '';
+    const imageUrl = '/api/gallery/files/' + id;
+    return `
+      <div class="ref-item">
+        <img src="${imageUrl}" alt="${escAttr(p.name || '')}">
+        <button class="del" onclick="removeReference(${id})">&times;</button>
+      </div>`;
+  }).join('');
+}
+
+async function toggleFavorite(id) {
+  try {
+    const p = galleryPictures.find(g => g.id === id);
+    if (!p) return;
+    const newFav = !p.favorited;
+    const resp = await fetch('/api/gallery/' + id + '/favorite?favorited=' + newFav, { method: 'POST' });
+    const result = await resp.json();
+    if (result.code === 0) {
+      // Update local cache
+      const idx = galleryPictures.findIndex(g => g.id === id);
+      if (idx >= 0) {
+        galleryPictures[idx] = result.data;
+      }
+      renderGallery(galleryPictures);
+      toast(newFav ? '已收藏' : '已取消收藏');
+    } else {
+      toast('操作失败: ' + result.message);
+    }
+  } catch (e) {
+    toast('网络异常');
+  }
+}
+
+async function analyzePicture(id) {
+  toast('正在发起AI分析...');
+  try {
+    const resp = await fetch('/api/profile/' + id + '/analyze', { method: 'POST' });
+    const result = await resp.json();
+    if (result.code === 0) {
+      const profile = result.data;
+      toast('分析完成: ' + (profile.subject || '暂无主题') + ' / ' + (profile.style || '暂无风格'));
+    } else {
+      toast('分析失败: ' + result.message);
+    }
+  } catch (e) {
+    toast('网络异常');
+  }
+}
+
+/* ====== UPLOAD ====== */
+function showUploadForm() {
+  document.getElementById('upload-form').classList.add('show');
+  document.getElementById('upload-file-name').textContent = '未选择文件';
+  uploadFileBase64 = null;
+}
+
+function hideUploadForm() {
+  document.getElementById('upload-form').classList.remove('show');
+  uploadFileBase64 = null;
+}
+
+function triggerFilePicker() {
+  document.getElementById('hidden-file-input').click();
+}
+
+function onUploadFileSelect(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  document.getElementById('upload-file-name').textContent = file.name;
+  const reader = new FileReader();
+  reader.onload = () => {
+    uploadFileBase64 = reader.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+async function doUpload() {
+  if (!uploadFileBase64) {
+    toast('请先选择图片文件');
+    return;
+  }
+  const name = document.getElementById('upload-name').value.trim();
+  const category = document.getElementById('upload-category').value.trim();
+  const tagsStr = document.getElementById('upload-tags').value.trim();
+  const tags = tagsStr ? tagsStr.split(',').map(s => s.trim()).filter(Boolean) : [];
+
+  const body = {
+    imageBase64: uploadFileBase64,
+    name: name || null,
+    introduction: null,
+    category: category || null,
+    tags: tags.length > 0 ? tags : null
+  };
+
+  try {
+    const resp = await fetch('/api/gallery/upload', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    const result = await resp.json();
+    if (result.code === 0) {
+      toast('上传成功');
+      hideUploadForm();
+      // Reset form
+      document.getElementById('upload-name').value = '';
+      document.getElementById('upload-category').value = '';
+      document.getElementById('upload-tags').value = '';
+      document.getElementById('hidden-file-input').value = '';
+      loadGallery();
+    } else {
+      toast('上传失败: ' + result.message);
+    }
+  } catch (e) {
+    toast('网络异常');
+  }
+}
+
+/* ====== URL IMPORT ====== */
+function showImportDialog() {
+  document.getElementById('import-modal').style.display = 'flex';
+}
+
+function hideImportDialog() {
+  document.getElementById('import-modal').style.display = 'none';
+  document.getElementById('import-url-input').value = '';
+  document.getElementById('import-name-input').value = '';
+  document.getElementById('import-category-input').value = '';
+  document.getElementById('import-tags-input').value = '';
+}
+
+async function doImportUrl() {
+  const imageUrl = document.getElementById('import-url-input').value.trim();
+  if (!imageUrl) {
+    toast('请输入图片URL');
+    return;
+  }
+  const name = document.getElementById('import-name-input').value.trim();
+  const category = document.getElementById('import-category-input').value.trim();
+  const tagsStr = document.getElementById('import-tags-input').value.trim();
+  const tags = tagsStr ? tagsStr.split(',').map(s => s.trim()).filter(Boolean) : [];
+
+  const body = {
+    imageUrl: imageUrl,
+    name: name || null,
+    introduction: null,
+    category: category || null,
+    tags: tags.length > 0 ? tags : null
+  };
+
+  try {
+    const resp = await fetch('/api/gallery/import-url', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    const result = await resp.json();
+    if (result.code === 0) {
+      toast('导入成功');
+      hideImportDialog();
+      loadGallery();
+    } else {
+      toast('导入失败: ' + result.message);
+    }
+  } catch (e) {
+    toast('网络异常');
+  }
+}
+
+/* ====== TEMPLATES ====== */
+async function loadTemplates() {
+  try {
+    const resp = await fetch('/api/template');
+    const result = await resp.json();
+    if (result.code === 0 && result.data) {
+      templates = result.data;
+      renderTemplateSelect(result.data);
+    }
+  } catch (e) {
+    // templates failed to load — not critical
+  }
+}
+
+function renderTemplateSelect(templateList) {
+  const sel = document.getElementById('template-select');
+  // Keep the first "auto" option
+  sel.innerHTML = '<option value="">自动匹配</option>';
+  templateList.forEach(t => {
+    const opt = document.createElement('option');
+    opt.value = t.code;
+    opt.textContent = t.name + ' (' + (t.category || t.scene || '通用') + ')';
+    sel.appendChild(opt);
+  });
+}
+
+/* ====== RAG TOGGLE ====== */
+function toggleRag() {
+  useGalleryRag = !useGalleryRag;
+  const el = document.getElementById('rag-toggle');
+  if (useGalleryRag) el.classList.add('on'); else el.classList.remove('on');
+}
+
+function toggleSave() {
+  saveGeneratedToGallery = !saveGeneratedToGallery;
+  const el = document.getElementById('save-toggle');
+  if (saveGeneratedToGallery) el.classList.add('on'); else el.classList.remove('on');
+}
+
+/* ====== RAG DEBUG INFO ====== */
+function showRagDebugInfo(debugInfo) {
+  // Try to parse if it's a string
+  let info = debugInfo;
+  if (typeof info === 'string') {
+    try { info = JSON.parse(info); } catch (e) { /* plain text */ }
+  }
+
+  if (typeof info === 'object') {
+    // Retrieved pictures
+    if (info.retrievedPictures && info.retrievedPictures.length > 0) {
+      document.getElementById('rag-results-section').style.display = 'block';
+      document.getElementById('rag-retrieved').innerHTML = info.retrievedPictures.map(p => {
+        const imgUrl = '/api/gallery/files/' + p.pictureId;
+        const score = p.similarityScore ? (p.similarityScore * 100).toFixed(1) + '%' : '';
+        return `
+          <div class="rag-card">
+            <img src="${imgUrl}" alt="">
+            <div class="score">${score}</div>
+          </div>`;
+      }).join('');
+    }
+
+    // Matched template
+    if (info.matchedTemplate) {
+      document.getElementById('matched-template-section').style.display = 'block';
+      const t = info.matchedTemplate;
+      document.getElementById('matched-template-info').innerHTML =
+        '<strong>' + escHtml(t.name || t.code || '') + '</strong>' +
+        (t.category ? ' / ' + escHtml(t.category) : '') +
+        (t.scene ? ' / ' + escHtml(t.scene) : '');
+    }
+
+    // Enhanced prompt
+    if (info.enhancedPrompt) {
+      showPromptDebug(info.enhancedPrompt);
+    }
+
+    // Full raw display for unknown fields
+    if (!info.retrievedPictures && !info.matchedTemplate && !info.enhancedPrompt) {
+      showPromptDebug(JSON.stringify(info, null, 2));
+    }
+  } else if (typeof info === 'string' && info.trim()) {
+    showPromptDebug(info);
+  }
+}
+
+function showPromptDebug(text) {
+  document.getElementById('debug-prompt-section').style.display = 'block';
+  document.getElementById('debug-prompt-text').textContent = text;
+  // Auto-expand the details block
+  const block = document.getElementById('debug-prompt-block');
+  block.open = true;
+}
+
+/* ====== HELPERS ====== */
+function escHtml(s) {
+  if (!s) return '';
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+function escAttr(s) {
+  if (!s) return '';
+  return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 </script>
 </body>

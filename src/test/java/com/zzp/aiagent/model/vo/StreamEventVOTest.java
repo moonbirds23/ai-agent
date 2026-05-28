@@ -113,7 +113,7 @@ class StreamEventVOTest {
     @Test
     @DisplayName("done 序列化 → data 嵌套 ChatResponseVO 完整输出")
     void done_shouldSerializeDataNested() throws Exception {
-        ChatResponseVO data = new ChatResponseVO("id1", "chat", "你好", null, null, null, null, null, null);
+        ChatResponseVO data = new ChatResponseVO("id1", "chat", "你好", null, null, null, null, null, null, null);
         String json = mapper.writeValueAsString(StreamEventVO.done("id1", data));
 
         assertThat(json).contains("\"type\":\"done\"");
