@@ -11,6 +11,8 @@ import com.zzp.aiagent.exception.BusinessException;
 import com.zzp.aiagent.exception.ErrorCode;
 import com.zzp.aiagent.image.ImageGenerationService;
 import com.zzp.aiagent.image.VisionAnalysisService;
+import com.zzp.aiagent.knowledge.KnowledgeService;
+import com.zzp.aiagent.knowledge.model.KnowledgeAsset;
 import com.zzp.aiagent.model.dto.chat.ChatRequest;
 import com.zzp.aiagent.model.dto.image.ImageAgentResponse;
 import com.zzp.aiagent.model.dto.image.ImageGenerationResult;
@@ -53,14 +55,17 @@ public class PictureApp {
     private final ObjectMapper objectMapper;
     private final ImageGenerationService imageGenerationService;
     private final VisionAnalysisService visionAnalysisService;
+    private final KnowledgeService knowledgeService;
 
     public PictureApp(ChatModel openAiChatModel, ChatMemory chatMemory, PromptTemplate promptTemplate,
-                      ImageGenerationService imageGenerationService, VisionAnalysisService visionAnalysisService) {
+                      ImageGenerationService imageGenerationService, VisionAnalysisService visionAnalysisService,
+                      KnowledgeService knowledgeService) {
         this.chatMemory = chatMemory;
         this.outputConverter = new BeanOutputConverter<>(ImageAgentResponse.class);
         this.objectMapper = new ObjectMapper();
         this.imageGenerationService = imageGenerationService;
         this.visionAnalysisService = visionAnalysisService;
+        this.knowledgeService = knowledgeService;
         String systemPrompt = promptTemplate.render("default", "system",
                 "outputFormat", outputConverter.getFormat());
         this.chatClient = ChatClient.builder(openAiChatModel)
@@ -118,8 +123,10 @@ public class PictureApp {
                 ? request.message()
                 : "基于以上对话内容，请生成最终的图片生成参数";
 
+        String augmentedMsg = augmentWithKnowledge(msg);
+
         ImageAgentResponse aiResp = chatClient.prompt()
-                .user(msg)
+                .user(augmentedMsg)
                 .advisors(spec -> spec
                         .param(MessageChatMemoryAdvisor.CHAT_MEMORY_CONVERSATION_ID_KEY, chatId)
                         .param(MessageChatMemoryAdvisor.CHAT_MEMORY_RETRIEVE_SIZE_KEY, 50)
@@ -221,9 +228,11 @@ public class PictureApp {
                 ? request.message()
                 : "基于以上对话内容，请生成最终的图片生成参数";
 
+        String augmentedMsg = augmentWithKnowledge(msg);
+
         Flux<StreamEventVO> generateEvent = Flux.defer(() -> {
             ImageAgentResponse aiResp = chatClient.prompt()
-                    .user(msg)
+                    .user(augmentedMsg)
                     .advisors(spec -> spec
                             .param(MessageChatMemoryAdvisor.CHAT_MEMORY_CONVERSATION_ID_KEY, chatId)
                             .param(MessageChatMemoryAdvisor.CHAT_MEMORY_RETRIEVE_SIZE_KEY, 50)
@@ -340,6 +349,23 @@ public class PictureApp {
             return trimmed.substring(comma + 1);
         }
         return trimmed;
+    }
+
+    private String augmentWithKnowledge(String query) {
+        List<KnowledgeAsset> refs = knowledgeService.semanticSearch(query, 5);
+        if (refs.isEmpty()) {
+            log.info("[RAG] 无匹配知识库条目 query={}", query);
+            return query;
+        }
+        log.info("[RAG] 检索到 {} 条参考:\n{}",
+                refs.size(),
+                refs.stream().map(a -> "  - [" + a.title() + "] " + a.description()).collect(java.util.stream.Collectors.joining("\n")));
+        String styleRefs = refs.stream()
+                .map(a -> "- " + a.description())
+                .collect(java.util.stream.Collectors.joining("\n"));
+        String augmented = "[参考风格]\n" + styleRefs + "\n[用户需求] " + query;
+        log.info("[RAG] 增强后 Prompt ({} 字符):\n{}", augmented.length(), augmented);
+        return augmented;
     }
 
     private ChatResponseVO parseStructuredOrFallback(String rawText, String chatId) {

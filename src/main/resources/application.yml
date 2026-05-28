@@ -1,11 +1,17 @@
 spring:
   ai:
     openai:
-      api-key: ${DEEPSEEK_API_KEY}
-      base-url: https://api.deepseek.com
+      api-key: ${ZHIPU_API_KEY:}
+      base-url: https://open.bigmodel.cn/api/paas/v4
       chat:
+        completions-path: /chat/completions
         options:
-          model: deepseek-chat
+          model: glm-4-flash
+      embedding:
+        enabled: true
+        embeddings-path: /embeddings
+        options:
+          model: embedding-2
   data:
     redis:
       host: ${REDIS_HOST:localhost}

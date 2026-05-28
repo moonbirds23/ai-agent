@@ -3,6 +3,7 @@ package com.zzp.aiagent.app;
 import com.zzp.aiagent.common.PromptTemplate;
 import com.zzp.aiagent.image.ImageGenerationService;
 import com.zzp.aiagent.image.VisionAnalysisService;
+import com.zzp.aiagent.knowledge.KnowledgeService;
 import com.zzp.aiagent.model.dto.chat.ChatRequest;
 import com.zzp.aiagent.model.vo.ChatResponseVO;
 import org.junit.jupiter.api.BeforeEach;
@@ -20,6 +21,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -45,8 +47,10 @@ class PictureAppMultiTurnTest {
     @BeforeEach
     void setUp() {
         chatModel = mock(ChatModel.class);
+        KnowledgeService knowledgeService = mock(KnowledgeService.class);
+        when(knowledgeService.semanticSearch(any(), anyInt())).thenReturn(List.of());
         pictureApp = new PictureApp(chatModel, new InMemoryChatMemory(), new PromptTemplate(),
-                mock(ImageGenerationService.class), mock(VisionAnalysisService.class));
+                mock(ImageGenerationService.class), mock(VisionAnalysisService.class), knowledgeService);
     }
 
     private static ChatRequest req(String message) {

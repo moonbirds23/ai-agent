@@ -20,6 +20,7 @@ public enum ErrorCode {
     UNSUPPORTED_MEDIA_TYPE(40203, "不支持的多媒体类型"),
     IMAGE_GENERATION_FAILED(50020, "图片生成失败"),
     IMAGE_ANALYSIS_FAILED(50021, "图片分析失败"),
+    KNOWLEDGE_OPERATION_FAILED(50030, "知识库操作失败"),
     SYSTEM_ERROR(59999, "系统内部异常");
 
     private final int code;

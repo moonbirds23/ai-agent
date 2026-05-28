@@ -5,6 +5,7 @@ import com.zzp.aiagent.exception.BusinessException;
 import com.zzp.aiagent.exception.ErrorCode;
 import com.zzp.aiagent.image.ImageGenerationService;
 import com.zzp.aiagent.image.VisionAnalysisService;
+import com.zzp.aiagent.knowledge.KnowledgeService;
 import com.zzp.aiagent.model.dto.chat.ChatRequest;
 import com.zzp.aiagent.model.dto.image.ImageGenerationResult;
 import com.zzp.aiagent.model.dto.image.VisionAnalysisResult;
@@ -30,6 +31,7 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -50,6 +52,7 @@ class PictureAppMultimodalTest {
     private ChatModel chatModel;
     private ImageGenerationService imageGenService;
     private VisionAnalysisService visionAnalysisService;
+    private KnowledgeService knowledgeService;
     private PictureApp pictureApp;
 
     @BeforeEach
@@ -57,8 +60,10 @@ class PictureAppMultimodalTest {
         chatModel = mock(ChatModel.class);
         imageGenService = mock(ImageGenerationService.class);
         visionAnalysisService = mock(VisionAnalysisService.class);
+        knowledgeService = mock(KnowledgeService.class);
+        when(knowledgeService.semanticSearch(any(), anyInt())).thenReturn(List.of());
         pictureApp = new PictureApp(chatModel, new InMemoryChatMemory(), new PromptTemplate(),
-                imageGenService, visionAnalysisService);
+                imageGenService, visionAnalysisService, knowledgeService);
     }
 
     private static String jsonChat(String message) {
