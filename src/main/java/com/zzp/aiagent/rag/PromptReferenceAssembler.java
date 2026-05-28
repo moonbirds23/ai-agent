@@ -11,6 +11,7 @@ import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * Prompt 参考信息装配器：将 RAG 上下文中的参考图/风格模板格式化为 LLM 可理解的提示词段落，
@@ -124,6 +125,20 @@ public class PromptReferenceAssembler {
         // 最终增强Prompt
         if (enhancedPrompt != null && !enhancedPrompt.isBlank()) {
             data.put("enhancedPrompt", enhancedPrompt);
+        }
+
+        // RAG 增强链路追踪数据（来自 RagContext.trace）
+        Map<String, Object> enhanceTrace = context.getTrace();
+        if (enhanceTrace != null && !enhanceTrace.isEmpty()) {
+            if (enhanceTrace.containsKey("rewrittenQuery")) {
+                data.put("rewrite", enhanceTrace.get("rewrittenQuery"));
+            }
+            if (enhanceTrace.containsKey("resolvedReferenceMode")) {
+                data.put("referenceMode", enhanceTrace.get("resolvedReferenceMode"));
+            }
+            if (enhanceTrace.containsKey("selectedSummary")) {
+                data.put("selected", enhanceTrace.get("selectedSummary"));
+            }
         }
 
         return data;

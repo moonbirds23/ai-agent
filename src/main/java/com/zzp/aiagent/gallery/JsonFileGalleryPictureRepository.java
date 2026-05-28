@@ -18,7 +18,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.locks.ReentrantLock;
 
-@Profile("!test")
+@Profile("!test & !postgres")
 @Repository
 @Slf4j
 public class JsonFileGalleryPictureRepository implements GalleryPictureRepository {
@@ -31,9 +31,8 @@ public class JsonFileGalleryPictureRepository implements GalleryPictureRepositor
     private long nextId;
     private List<GalleryPicture> pictures;
 
-    public JsonFileGalleryPictureRepository() {
-        this.objectMapper = new ObjectMapper();
-        this.objectMapper.registerModule(new JavaTimeModule());
+    public JsonFileGalleryPictureRepository(ObjectMapper objectMapper) {
+        this.objectMapper = objectMapper;
     }
 
     @PostConstruct

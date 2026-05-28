@@ -55,7 +55,7 @@ class RedisChatMemoryTest {
         listOps = mock(ListOperations.class);
         when(redis.opsForList()).thenReturn(listOps);
         when(redis.expire(anyString(), any(Duration.class))).thenReturn(true);
-        memory = new RedisChatMemory(redis);
+        memory = new RedisChatMemory(redis, new ObjectMapper());
     }
 
     @SuppressWarnings("unchecked")
@@ -150,43 +150,31 @@ class RedisChatMemoryTest {
 
     // ── 存储读取 ─────────────────────────────────────────────────
 
-    /**
-     * 目的：验证 get(chatId, lastN) 只返回最近 N 条，且还原为正确的 Message 子类。
-     * 实现：mock 5 条消息 → get(chatId, 2) → 返回最后 2 条 → 断言类型和文本。
-     * 结果：返回 2 条，第 1 条 UserMessage("消息3")，第 2 条 AssistantMessage("回复3")。
-     */
     @Test
-    @DisplayName("get(chatId, lastN) → 取回最多 lastN 条消息")
-    void get_returnsLastN() {
+    @DisplayName("get(chatId) → 取回全部消息")
+    void get_returnsMessages() {
         String key = "chat:memory:chat-1";
-        when(listOps.size(key)).thenReturn(5L);
-        String json1 = "{\"role\":\"USER\",\"content\":\"消息3\"}";
-        String json2 = "{\"role\":\"ASSISTANT\",\"content\":\"回复3\"}";
-        when(listOps.range(key, 3, -1)).thenReturn(List.of(json1, json2));
+        String json1 = "{\"role\":\"USER\",\"content\":\"消息1\"}";
+        String json2 = "{\"role\":\"ASSISTANT\",\"content\":\"回复1\"}";
+        when(listOps.range(key, 0, -1)).thenReturn(List.of(json1, json2));
 
-        List<Message> result = memory.get("chat-1", 2);
+        List<Message> result = memory.get("chat-1");
 
         assertThat(result).hasSize(2);
         assertThat(result.get(0)).isInstanceOf(UserMessage.class);
         assertThat(result.get(1)).isInstanceOf(AssistantMessage.class);
-        assertThat(result.get(0).getText()).isEqualTo("消息3");
-        assertThat(result.get(1).getText()).isEqualTo("回复3");
+        assertThat(result.get(0).getText()).isEqualTo("消息1");
+        assertThat(result.get(1).getText()).isEqualTo("回复1");
     }
 
-    /**
-     * 目的：验证不存在的 conversationId 返回空列表而非抛异常。
-     * 实现：mock listOps.size 返回 0 → get → 断言空列表。
-     * 结果：返回空 List，不会继续调用 range。
-     */
     @Test
     @DisplayName("get → key 不存在返回空列表")
     void get_emptyKey_returnsEmpty() {
-        when(listOps.size("chat:memory:new-chat")).thenReturn(0L);
+        when(listOps.range("chat:memory:new-chat", 0, -1)).thenReturn(null);
 
-        List<Message> result = memory.get("new-chat", 10);
+        List<Message> result = memory.get("new-chat");
 
         assertThat(result).isEmpty();
-        verify(listOps, never()).range(anyString(), anyLong(), anyLong());
     }
 
     /**

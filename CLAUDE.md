@@ -41,7 +41,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 项目定位
 
-云图库 AI 图片生成助手。全链路已切换智谱（`glm-4-flash` 文本 + `glm-4.5v` 视觉 + `embedding-2` 嵌入 + CogView 生图）。已完成对话链路、Advisor 拦截链、三层 RAG 增强（显式参考图 → 收藏图检索 → 风格模板兜底）、图库管理、图片 AI 画像、前端调试台。后续迁移融合到 Picture-Backend。
+云图库 AI 图片生成助手。全链路已切换智谱（`glm-4-flash` 文本 + `glm-4.5v` 视觉 + `embedding-2` 嵌入 + CogView 生图）。Spring AI 已升级 1.0.0 GA（2025-05-20 发布），M6→GA API 破坏性迁移已完成（Advisor/ChatMemory/ChatClient 全部适配）。已引入 PostgreSQL（含 Flyway 迁移）+ pgvector 向量库 + 对象存储抽象（local/COS 双实现）。后续迁移融合到 Picture-Backend。
 
 **编码规范对齐 Picture-Backend**（`D:\code\java\Picture-Backend`），后续两个项目将代码迁移融合上线。
 
@@ -102,7 +102,22 @@ com.zzp.aiagent
   ├── profile/          图片 AI 画像
   │     ├── model/PictureAiProfile.java  视觉分析结果 + indexText + vectorStatus
   │     └── PictureAiProfileService.java 分析/索引/删除
+  ├── storage/          对象存储抽象（Phase 3）
+  │     ├── ObjectStorageService.java    upload/download/delete/getUrl
+  │     ├── LocalObjectStorageService.java  @Profile("!cos") 本地文件存储
+  │     ├── CosObjectStorageService.java    @Profile("cos") COS 预留
+  │     └── StorageProperties.java         @ConfigurationProperties("app.storage")
+  ├── vector/            向量索引抽象（Phase 4）
+  │     ├── VectorIndexService.java      upsert/delete/search
+  │     ├── SimpleVectorIndexService.java  @Profile("!postgres") 基于 SimpleVectorStore
+  │     └── PgVectorIndexService.java      @Profile("postgres") 基于 PgVectorStore
   ├── rag/              三层 RAG 增强
+  │     ├── enhanc/                      RAG 增强链路接口（Phase 5）
+  │     │     ├── RagQueryRewriteService.java  LLM Query 改写
+  │     │     ├── HybridGalleryRetriever.java  混合检索
+  │     │     ├── RagReranker.java             规则重排序
+  │     │     ├── RagContextPacker.java        上下文压缩
+  │     │     └── RagTraceService.java         调试追踪
   │     ├── model/RagContext.java        三层上下文对象
   │     ├── ExplicitReferenceResolver.java  Layer 1 显式参考图解析
   │     ├── GalleryRagRetriever.java       Layer 2 向量检索
@@ -111,7 +126,6 @@ com.zzp.aiagent
   ├── template/         系统风格模板
   │     ├── model/StyleTemplate.java     模板 record
   │     └── StyleTemplateService.java    关键词匹配
-  └── knowledge/        旧版知识库模块（V1，将被 gallery/profile/rag 替代）
 ```
 
 ### 核心分层规则
@@ -242,18 +256,21 @@ Advisor 内抛 `BusinessException` → `ExceptionGuardAdvisor`（order=MAX）兜
 | 坑 | 说明 |
 |----|------|
 | **系统 JDK 是 1.8** | 所有 Maven 命令必须加 `JAVA_HOME="D:/develop/java/JDK/jdk-21"`，否则编译失败 |
-| **adviseContext 不能传 null** | M6 强制非 null 校验，构造 AdvisedResponse 时必须有 `new HashMap<>()` |
+| **Spring AI 1.0.0 GA API 破坏性变化** | M6→GA 全量重命名：`CallAroundAdvisor`→`CallAdvisor`，`AdvisedRequest`→`ChatClientRequest`，`AdvisedResponse`→`ChatClientResponse`，链方法 `nextAroundCall`→`nextCall`，`MessageChatMemoryAdvisor` 构造器→Builder 模式，`InMemoryChatMemory`→`MessageWindowChatMemory`+`InMemoryChatMemoryRepository`，`Media` 移到 `org.springframework.ai.content`，`CallAdvisorChain`/`StreamAdvisorChain` 不再是函数式接口（多了 `getCallAdvisors()`/`getStreamAdvisors()` 方法），`ChatMemory` 新增 `get(String)` 抽象方法 |
 | **onErrorResume 顺序** | 流式异常处理必须 `.onErrorResume(BusinessException.class, ...)` 在前、`.onErrorResume(e -> ...)` 在后，否则子类被父类吞掉 |
-| **test profile 隔离** | AI 相关 Bean（PictureApp、ChatController 等）标注 `@Profile("!test")`，test profile 排除 `OpenAiAutoConfiguration` |
-| **MessageAggregator 路径** | 不在 advisor 包下，全限定名 `org.springframework.ai.chat.model.MessageAggregator` |
+| **test profile 隔离** | AI 相关 Bean 标注 `@Profile("!test")`，test profile 需排除 DataSource/Flyway/OpenAI 全家桶自动配置，并设 `spring.ai.openai.api-key: test-fake-key` |
+| **ChatClientMessageAggregator 替代 MessageAggregator** | 1.0.0 GA 新增 `ChatClientMessageAggregator`（`spring-ai-client-chat`），`MessageAggregator`（`spring-ai-model`）降级为处理裸 `ChatResponse`。LoggingAdvisor 已迁移到新 API |
+| **Chain 不再是函数式接口** | `CallAdvisorChain`/`StreamAdvisorChain` 在 1.0.0 各有 2 个抽象方法，测试中不能再 `chain -> response` lambda，须用 `mock(CallAdvisorChain.class)` |
+| **JDBC 依赖触发 DataSource 自动配置** | 加入 `spring-boot-starter-jdbc` 后需在 test profile 排除 `DataSourceAutoConfiguration` + `FlywayAutoConfiguration`，否则容器启动失败 |
+| **PostgreSQL profile 策略** | `postgres` profile 激活 `Postgres*Repository`（@Primary 覆盖 JsonFile），PgVectorStore 覆盖 SimpleVectorStore。默认 profiles（无 postgres）走 local JSON + SimpleVectorStore |
 | **API Key 不入库** | 通过环境变量 `ZHIPU_API_KEY` + `application-local.yml`（gitignored）注入 |
 | **BaseResponse 反序列化** | 必须保留 `@NoArgsConstructor`，否则 Jackson 无法反序列化 |
 | **用户消息模板不要包含 JSON Schema** | `{outputFormat}` 在 user message 中被替换为 JSON Schema 后，Spring AI 的 StringTemplate4 会把 Schema 中的 `{}` 当模板语法解析崩溃。输出格式约束只能放在 system prompt 中 |
-| **SimpleVectorStore 内存持久化** | 向量在内存中，`@PreDestroy` 时才通过 `VectorStorePersistence` 写入 `kb-data/vector-store.json`。服务被 `taskkill` 强杀时数据丢失 |
+| **SimpleVectorStore 内存持久化** | 向量在内存中，`@PreDestroy` 时才通过 `VectorStorePersistence` 写入 `data/vector-store.json`。服务被 `taskkill` 强杀时数据丢失 |
 | **ImageIO 读不了 webp** | `javax.imageio.ImageIO` 不支持 webp 格式，`GalleryServiceImpl.upload()` 中的宽高检测对 webp 图片返回 0x0 |
 | **智谱 embedding-2 相似度偏低** | 语义相关内容余弦相似度通常 0.4~0.5，`GalleryRagRetriever.MIN_SCORE` 设 0.4 较为合理，0.65 过严会导致大量漏召回 |
 | **RAG Prompt 写入 ChatMemory** | 当前 RAG 增强后的完整 Prompt 通过 `chatClient.prompt().user()` 传入，会被 `MessageChatMemoryAdvisor` 自动存入记忆。方案设计要求"RAG 上下文只作为本次调用临时 Prompt，不写入 ChatMemory"，当前违反此约束 |
-| **新旧模块共存** | `knowledge/`（V1，`kb-data/`）和 `gallery/profile/rag`（V2，`gallery-data/`）两套模块同时存在。V1 的 `KnowledgeService` 已从 PictureApp 移除但模块文件未删。VectorStore 由旧 `KnowledgeConfig` 创建，被新 `GalleryRagRetriever` 和 `PictureAiProfileService` 共用 |
+| **RAG 增强链 Profile 策略** | 5 个 enhance 实现类中，`HybridGalleryRetrieverImpl` 是 `@Profile("postgres")`（依赖 pgvector），其余 4 个是 `@Profile("!test")`。`RagServiceImpl` 通过 `ObjectProvider<T>` 注入所有增强组件，检测到全部就绪时走增强路径，否则走原三层 RAG 降级。测试中需 mock 5 个 ObjectProvider 并设 `@MockitoSettings(strictness = Strictness.LENIENT)` 避免 UnnecessaryStubbing |
 
 ## 多模态架构
 
@@ -329,11 +346,97 @@ public interface ImageGenerationService {
 - [x] 三层 RAG 增强（显式参考图 → 收藏图检索 → 风格模板兜底）
 - [x] 系统风格模板（10 套预设，关键词匹配，`style-templates.yml`）
 - [x] 前端三栏调试台（图库管理/对话生图/参考调试面板）
-- [x] 向量持久化（SimpleVectorStore + kb-data/vector-store.json）
-- [x] 单元测试 87 个
+- [x] 向量持久化（SimpleVectorStore + data/vector-store.json）
+- [x] 单元测试 167 个（含 80 个新增 RAG 核心链路测试）
 - [ ] `saveGeneratedToGallery` 实现（生图成功后保存到图库，当前只有 TODO）
 - [ ] `referenceMode` 实际应用（overall/style/color/composition 裁剪参考图字段）
 - [ ] RAG Prompt 不写入 ChatMemory（当前违反设计约束）
 - [ ] 真实生图 API 接入（DALL·E / SD，接口已预留）
 - [ ] 会话记忆持久化（当前 InMemory，重启丢失）
-- [ ] 旧 knowledge/ 模块清理（V1，已被 gallery/profile/rag 替代）
+- [x] 旧 knowledge/ 模块清理
+- [x] **Spring AI 1.0.0 GA 升级**（M6→GA，BOM 统一依赖管理，Advisor/ChatMemory/ChatClient API 全量迁移）
+- [x] **PostgreSQL 落库**（Flyway V1-V2 迁移脚本，`PostgresGalleryPictureRepository` + `PostgresPictureAiProfileRepository`，`@Profile("postgres")` 切换）
+- [x] **对象存储抽象**（`ObjectStorageService` 接口，`LocalObjectStorageService` 默认实现，`CosObjectStorageService` 预留，`GalleryServiceImpl` 已重构）
+- [x] **pgvector + VectorIndexService**（`VectorIndexService` 抽象，`SimpleVectorIndexService` / `PgVectorIndexService` 双实现，`PictureAiProfileServiceImpl` + `GalleryRagRetriever` 已用新接口）
+- [x] **RAG 增强接口体系**（`rag/enhance/` 包：QueryRewrite / HybridRetrieve / Rerank / ContextPack / Trace，接口+Record 已定义）
+- [x] **RAG 增强链路完整实现**（`RagQueryRewriteServiceImpl` LLM改写 + `HybridGalleryRetrieverImpl` 混合检索 + `RagRerankerImpl` 加权重排序 + `RagContextPackerImpl` referenceMode裁剪+字数截断 + `RagTraceServiceImpl` 追踪日志，`RagServiceImpl` 已集成，postgres profile 激活增强路径，默认 profile 走原三层 RAG 降级）
+- [x] **`referenceMode` 实际应用**（overall/style/color/composition 裁剪参考图画像字段，LLM Query Rewrite 自动推断 referenceMode，RagContextPacker 按 mode 裁剪 prompt 上下文）
+- [ ] RAG Prompt 不写入 ChatMemory（当前违反设计约束）
+
+## 测试分类
+
+测试按 `@Tag` 分为两类，按模块分子包：
+
+### 分类
+
+| 标签 | 范围 | 特征 |
+|------|------|------|
+| `@Tag("unit")` | 纯单元测试 | 无 Spring 容器、无 Mockito stub，纯逻辑验证 |
+| `@Tag("integration")` | 集成测试 | 使用 `@ExtendWith(MockitoExtension.class)` + `@Mock` 隔离外部依赖 |
+
+### 模块分布
+
+| 包 | 类型 | 测试数 | 覆盖内容 |
+|----|------|--------|----------|
+| `advisor/` | unit + integration | ~30 | ContentGuard/PromptOptimize/Logging/ExceptionGuard 非流式+流式+图片 |
+| `app/` | integration | ~20 | PictureApp 流式/多模态/多轮/视觉模型 |
+| `common/` | unit | 9 + 10 | BaseResponse 序列化 + PromptTemplate 模板引擎 |
+| `exception/` | unit | ~5 | GlobalExceptionHandler |
+| `memory/` | unit | ~5 | RedisChatMemory + MessageRecord |
+| `model/` | unit | ~5 | StreamEventVO + DTO 序列化 |
+| **`rag/`** (新增) | unit + integration | **68** | RagContext 模型 + PromptReferenceAssembler 装配 + RagService 编排 + ExplicitReferenceResolver 解析 + GalleryRagRetriever 检索 |
+| **`template/`** (新增) | unit | **13** | StyleTemplateService 关键词匹配/编码查找/全量列出 |
+
+### RAG 测试专项（核心链路覆盖）
+
+```
+RagContextTest (unit)
+  ├── empty() → 三层全空, isEmpty=true
+  ├── addExplicit → 追加/去null/多张
+  ├── addRetrieved → 与explicit隔离
+  ├── withTemplate → 设置模板
+  ├── isEmpty → 三层组合判断(4种)
+  └── ReferencePicture → 组合/无profile
+
+PromptReferenceAssemblerTest (unit)
+  ├── assemble() → 空上下文/仅explicit/仅retrieved/仅template/三层全有/无画像
+  ├── buildDebugInfo() → 空/有参考图/有模板
+  └── buildDebugData() → enhancedPrompt/retrieved含id+name/无名回退/无画像无style键/模板字段
+
+RagServiceImplTest (integration, mock三层依赖)
+  ├── Layer1: 指定IDs→调resolver / 结果入上下文
+  ├── Layer2: useGalleryRag(null/true/false) / 检索结果入上下文 / 空消息跳过
+  ├── Layer3: L1+L2空→触发 / L1有→短路 / L2有→短路 / 显式code→getByCode
+  └── Combined: L1+L2同时存在+L3短路 / message=null跳过L2+L3
+
+ExplicitReferenceResolverTest (integration, mock图库+画像)
+  └── resolve(): 完整数据 / 无画像→stub / 部分ID不存在→跳过 / GalleryService异常降级
+
+GalleryRagRetrieverTest (integration, mock向量存储+图库+画像)
+  ├── retrieve(): 检索解析 / 无匹配 / null/blank查询 / 多条全部返回 / VectorStore异常降级 / 图库记录缺失
+  └── docId解析: "pic-42"→42 / 非pic-前缀→跳过 / "pic-abc"→跳过
+
+StyleTemplateServiceTest (unit)
+  ├── listAll(): 全量5模板
+  ├── getByCode(): 存在/不存在
+  └── match(): 精确/多命中/无关/null/空/双向子串/最高分胜出
+```
+
+### 运行命令
+
+```bash
+# 全量测试
+JAVA_HOME="D:/develop/java/JDK/jdk-21" mvn test
+
+# 仅单元测试
+JAVA_HOME="D:/develop/java/JDK/jdk-21" mvn test -Dgroups="unit"
+
+# 仅集成测试
+JAVA_HOME="D:/develop/java/JDK/jdk-21" mvn test -Dgroups="integration"
+
+# 仅 RAG 模块
+JAVA_HOME="D:/develop/java/JDK/jdk-21" mvn test -Dtest="com.zzp.aiagent.rag.*"
+
+# 仅模板模块
+JAVA_HOME="D:/develop/java/JDK/jdk-21" mvn test -Dtest="com.zzp.aiagent.template.*"
+```

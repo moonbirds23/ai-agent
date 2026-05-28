@@ -7,10 +7,10 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
-import org.springframework.ai.chat.client.advisor.api.AdvisedRequest;
-import org.springframework.ai.chat.client.advisor.api.AdvisedResponse;
-import org.springframework.ai.chat.client.advisor.api.CallAroundAdvisorChain;
-import org.springframework.ai.chat.client.advisor.api.StreamAroundAdvisorChain;
+import org.springframework.ai.chat.client.ChatClientRequest;
+import org.springframework.ai.chat.client.ChatClientResponse;
+import org.springframework.ai.chat.client.advisor.api.CallAdvisorChain;
+import org.springframework.ai.chat.client.advisor.api.StreamAdvisorChain;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatModel;
@@ -36,8 +36,8 @@ import static org.mockito.Mockito.when;
  * 验证 4 个自定义 Advisor 在非流式路径 (aroundCall) 下的前置/后置逻辑正确性。
  *
  * <h3>实现方式</h3>
- * 每个 Advisor 独立为 @Nested 内部类，用 mock ChatModel 构造 AdvisedRequest，
- * 通过 mock CallAroundAdvisorChain 控制"下游返回什么"来隔离测试目标 Advisor。
+ * 每个 Advisor 独立为 @Nested 内部类，用 mock ChatModel 构造 ChatClientRequest，
+ * 通过 mock CallAdvisorChain 控制"下游返回什么"来隔离测试目标 Advisor。
  */
 @DisplayName("Advisor 链单元测试 (非流式)")
 class AdvisorTest {
@@ -49,22 +49,20 @@ class AdvisorTest {
         chatModel = mock(ChatModel.class);
     }
 
-    private AdvisedRequest requestWithUserText(String text) {
+    private ChatClientRequest requestWithUserText(String text) {
         Prompt prompt = text != null
                 ? new Prompt(List.of(new UserMessage(text)))
                 : new Prompt(List.of(new UserMessage("")));
-        return AdvisedRequest.builder()
-                .chatModel(chatModel)
-                .userText(text)
-                .messages(prompt.getInstructions())
-                .adviseContext(new HashMap<>())
+        return ChatClientRequest.builder()
+                .prompt(prompt)
+                .context(new HashMap<>())
                 .build();
     }
 
-    private static AdvisedResponse emptyResponse() {
-        return AdvisedResponse.builder()
-                .response(new ChatResponse(List.of(new Generation(new AssistantMessage("ok")))))
-                .adviseContext(new HashMap<>())
+    private static ChatClientResponse emptyResponse() {
+        return ChatClientResponse.builder()
+                .chatResponse(new ChatResponse(List.of(new Generation(new AssistantMessage("ok")))))
+                .context(new HashMap<>())
                 .build();
     }
 
@@ -84,58 +82,43 @@ class AdvisorTest {
         @Test
         @DisplayName("空消息 → 抛出 BusinessException")
         void emptyMessage() {
-            AdvisedRequest req = requestWithUserText("");
+            ChatClientRequest req = requestWithUserText("");
 
-            assertThatThrownBy(() -> advisor.aroundCall(req, chain -> null))
+            assertThatThrownBy(() -> advisor.adviseCall(req, mock(CallAdvisorChain.class)))
                     .isInstanceOf(BusinessException.class)
                     .extracting(e -> ((BusinessException) e).getCode())
                     .isEqualTo(ErrorCode.EMPTY_MESSAGE.getCode());
         }
 
-        /**
-         * 目的：null 消息应与空消息同等处理。
-         * 实现：userText=null → aroundCall → 断言异常类型和错误码。
-         * 结果：code=40100。
-         */
         @Test
         @DisplayName("null 消息 → 抛出 BusinessException")
         void nullMessage() {
-            AdvisedRequest req = requestWithUserText(null);
+            ChatClientRequest req = requestWithUserText(null);
 
-            assertThatThrownBy(() -> advisor.aroundCall(req, chain -> null))
+            assertThatThrownBy(() -> advisor.adviseCall(req, mock(CallAdvisorChain.class)))
                     .isInstanceOf(BusinessException.class)
                     .extracting(e -> ((BusinessException) e).getCode())
                     .isEqualTo(ErrorCode.EMPTY_MESSAGE.getCode());
         }
 
-        /**
-         * 目的：超过 2000 字符的消息应被拦截，防止滥用 API。
-         * 实现：构造 2001 个 'a' → aroundCall → 断言异常。
-         * 结果：code=40101 (MESSAGE_TOO_LONG)。
-         */
         @Test
         @DisplayName("超长消息 → 抛出 BusinessException")
         void tooLongMessage() {
             String longMsg = "a".repeat(2001);
-            AdvisedRequest req = requestWithUserText(longMsg);
+            ChatClientRequest req = requestWithUserText(longMsg);
 
-            assertThatThrownBy(() -> advisor.aroundCall(req, chain -> null))
+            assertThatThrownBy(() -> advisor.adviseCall(req, mock(CallAdvisorChain.class)))
                     .isInstanceOf(BusinessException.class)
                     .extracting(e -> ((BusinessException) e).getCode())
                     .isEqualTo(ErrorCode.MESSAGE_TOO_LONG.getCode());
         }
 
-        /**
-         * 目的：包含敏感词的消息应被内容安全过滤拦截。
-         * 实现：消息含"暴力" → aroundCall → 断言异常。
-         * 结果：code=40200 (CONTENT_BLOCKED)。
-         */
         @Test
         @DisplayName("敏感词 → 抛出 BusinessException")
         void blockedKeyword() {
-            AdvisedRequest req = requestWithUserText("我想生成暴力图片");
+            ChatClientRequest req = requestWithUserText("我想生成暴力图片");
 
-            assertThatThrownBy(() -> advisor.aroundCall(req, chain -> null))
+            assertThatThrownBy(() -> advisor.adviseCall(req, mock(CallAdvisorChain.class)))
                     .isInstanceOf(BusinessException.class)
                     .extracting(e -> ((BusinessException) e).getCode())
                     .isEqualTo(ErrorCode.CONTENT_BLOCKED.getCode());
@@ -149,15 +132,15 @@ class AdvisorTest {
         @Test
         @DisplayName("合法消息 → 放行到下一链路")
         void validMessage_passesThrough() {
-            AdvisedRequest req = requestWithUserText("帮我生成一张雪景图");
-            CallAroundAdvisorChain chain = mock(CallAroundAdvisorChain.class);
-            AdvisedResponse expected = emptyResponse();
-            when(chain.nextAroundCall(req)).thenReturn(expected);
+            ChatClientRequest req = requestWithUserText("帮我生成一张雪景图");
+            CallAdvisorChain chain = mock(CallAdvisorChain.class);
+            ChatClientResponse expected = emptyResponse();
+            when(chain.nextCall(req)).thenReturn(expected);
 
-            AdvisedResponse actual = advisor.aroundCall(req, chain);
+            ChatClientResponse actual = advisor.adviseCall(req, chain);
 
             assertThat(actual).isEqualTo(expected);
-            verify(chain).nextAroundCall(req);
+            verify(chain).nextCall(req);
         }
 
         /**
@@ -182,18 +165,18 @@ class AdvisorTest {
         /**
          * 目的：验证用户口语化输入被改写为包含画面主体/环境/光影的专业 prompt。
          * 实现：userText="雪景" → aroundCall → 验证 chain.nextAroundCall 被调用。
-         * 结果：下游收到的 AdvisedRequest 的 userText 已被替换为优化版。
+         * 结果：下游收到的 ChatClientRequest 的 userText 已被替换为优化版。
          */
         @Test
         @DisplayName("正常消息 → 改写 userText 为优化版 prompt")
         void normalMessage_getsOptimized() {
-            AdvisedRequest req = requestWithUserText("雪景");
-            CallAroundAdvisorChain chain = mock(CallAroundAdvisorChain.class);
-            when(chain.nextAroundCall(any())).thenReturn(emptyResponse());
+            ChatClientRequest req = requestWithUserText("雪景");
+            CallAdvisorChain chain = mock(CallAdvisorChain.class);
+            when(chain.nextCall(any())).thenReturn(emptyResponse());
 
-            advisor.aroundCall(req, chain);
+            advisor.adviseCall(req, chain);
 
-            verify(chain, times(1)).nextAroundCall(any());
+            verify(chain, times(1)).nextCall(any());
         }
 
         /**
@@ -204,33 +187,33 @@ class AdvisorTest {
         @Test
         @DisplayName("优化后 prompt 写入 adviseContext 共享给下游")
         void optimizedPrompt_sharedInContext() {
-            AdvisedRequest req = requestWithUserText("冬日雪景");
-            CallAroundAdvisorChain chain = mock(CallAroundAdvisorChain.class);
-            AdvisedResponse rawResponse = emptyResponse();
-            when(chain.nextAroundCall(any())).thenReturn(rawResponse);
+            ChatClientRequest req = requestWithUserText("冬日雪景");
+            CallAdvisorChain chain = mock(CallAdvisorChain.class);
+            ChatClientResponse rawResponse = emptyResponse();
+            when(chain.nextCall(any())).thenReturn(rawResponse);
 
-            AdvisedResponse response = advisor.aroundCall(req, chain);
+            ChatClientResponse response = advisor.adviseCall(req, chain);
 
-            assertThat(response.adviseContext()).containsKey("optimizedPrompt");
-            String optimized = (String) response.adviseContext().get("optimizedPrompt");
+            assertThat(response.context()).containsKey("optimizedPrompt");
+            String optimized = (String) response.context().get("optimizedPrompt");
             assertThat(optimized).contains("画面主体", "环境背景", "冬日雪景");
         }
 
         /**
          * 目的：空消息不做改写，原样透传（由 ContentGuard 在前面拦截非空校验）。
          * 实现：userText="" → aroundCall → 验证 chain 收到的仍是原 request（未改写）。
-         * 结果：chain.nextAroundCall(req) 被调用 1 次，参数为原 request。
+         * 结果：chain.nextCall(req) 被调用 1 次，参数为原 request。
          */
         @Test
         @DisplayName("空消息 → 不做改写，原样放行")
         void emptyMessage_passesThrough() {
-            AdvisedRequest req = requestWithUserText("");
-            CallAroundAdvisorChain chain = mock(CallAroundAdvisorChain.class);
-            when(chain.nextAroundCall(req)).thenReturn(emptyResponse());
+            ChatClientRequest req = requestWithUserText("");
+            CallAdvisorChain chain = mock(CallAdvisorChain.class);
+            when(chain.nextCall(req)).thenReturn(emptyResponse());
 
-            advisor.aroundCall(req, chain);
+            advisor.adviseCall(req, chain);
 
-            verify(chain).nextAroundCall(req);
+            verify(chain).nextCall(req);
         }
 
         /**
@@ -260,16 +243,16 @@ class AdvisorTest {
         @Test
         @DisplayName("非流式：正常执行 → 记录请求和响应日志")
         void normalExecution_logsRequestAndResponse() {
-            AdvisedRequest req = requestWithUserText("hello");
-            CallAroundAdvisorChain chain = mock(CallAroundAdvisorChain.class);
-            when(chain.nextAroundCall(any())).thenReturn(emptyResponse());
+            ChatClientRequest req = requestWithUserText("hello");
+            CallAdvisorChain chain = mock(CallAdvisorChain.class);
+            when(chain.nextCall(any())).thenReturn(emptyResponse());
 
-            AdvisedResponse response = advisor.aroundCall(req, chain);
+            ChatClientResponse response = advisor.adviseCall(req, chain);
 
             assertThat(response).isNotNull();
-            String text = response.response().getResult().getOutput().getText();
+            String text = response.chatResponse().getResult().getOutput().getText();
             assertThat(text).isEqualTo("ok");
-            verify(chain, times(1)).nextAroundCall(any());
+            verify(chain, times(1)).nextCall(any());
         }
 
         /**
@@ -280,12 +263,12 @@ class AdvisorTest {
         @Test
         @DisplayName("流式：MessageAggregator 聚合并记录完整响应")
         void stream_aggregatesAndLogs() {
-            AdvisedRequest req = requestWithUserText("hello");
-            StreamAroundAdvisorChain chain = mock(StreamAroundAdvisorChain.class);
-            AdvisedResponse chunk = emptyResponse();
-            when(chain.nextAroundStream(any())).thenReturn(Flux.just(chunk, chunk));
+            ChatClientRequest req = requestWithUserText("hello");
+            StreamAdvisorChain chain = mock(StreamAdvisorChain.class);
+            ChatClientResponse chunk = emptyResponse();
+            when(chain.nextStream(any())).thenReturn(Flux.just(chunk, chunk));
 
-            Flux<AdvisedResponse> result = advisor.aroundStream(req, chain);
+            Flux<ChatClientResponse> result = advisor.adviseStream(req, chain);
 
             StepVerifier.create(result)
                     .expectNextCount(2)
@@ -319,12 +302,12 @@ class AdvisorTest {
         @Test
         @DisplayName("正常执行 → 原样返回")
         void normalExecution_passesThrough() {
-            AdvisedRequest req = requestWithUserText("hello");
-            CallAroundAdvisorChain chain = mock(CallAroundAdvisorChain.class);
-            AdvisedResponse expected = emptyResponse();
-            when(chain.nextAroundCall(req)).thenReturn(expected);
+            ChatClientRequest req = requestWithUserText("hello");
+            CallAdvisorChain chain = mock(CallAdvisorChain.class);
+            ChatClientResponse expected = emptyResponse();
+            when(chain.nextCall(req)).thenReturn(expected);
 
-            AdvisedResponse actual = advisor.aroundCall(req, chain);
+            ChatClientResponse actual = advisor.adviseCall(req, chain);
 
             assertThat(actual).isEqualTo(expected);
         }
@@ -337,53 +320,47 @@ class AdvisorTest {
         @Test
         @DisplayName("业务异常 BusinessException → 转为友好回复")
         void businessException_returnsFriendlyResponse() {
-            AdvisedRequest req = requestWithUserText("test");
-            CallAroundAdvisorChain chain = r -> {
-                throw new BusinessException(ErrorCode.EMPTY_MESSAGE);
-            };
+            ChatClientRequest req = requestWithUserText("test");
+            CallAdvisorChain chain = mock(CallAdvisorChain.class);
+            when(chain.nextCall(any())).thenThrow(new BusinessException(ErrorCode.EMPTY_MESSAGE));
 
-            AdvisedResponse response = advisor.aroundCall(req, chain);
+            ChatClientResponse response = advisor.adviseCall(req, chain);
 
-            String text = response.response().getResult().getOutput().getText();
+            String text = response.chatResponse().getResult().getOutput().getText();
             assertThat(text).isEqualTo(ErrorCode.EMPTY_MESSAGE.getMessage());
         }
 
-        /**
-         * 目的：未知异常（如 NPE）被兜底捕获，返回内部错误提示，不暴露敏感信息。
-         * 实现：chain 模拟抛 RuntimeException → aroundCall → 断言返回文本为 SYSTEM_ERROR 的 message。
-         * 结果：响应文本为 "系统内部异常"。
-         */
         @Test
         @DisplayName("未知异常 → 转为 SYSTEM_ERROR 友好回复")
         void unknownException_returnsInternalError() {
-            AdvisedRequest req = requestWithUserText("test");
-            CallAroundAdvisorChain chain = r -> {
-                throw new RuntimeException("模拟未知错误");
-            };
+            ChatClientRequest req = requestWithUserText("test");
+            CallAdvisorChain chain = mock(CallAdvisorChain.class);
+            when(chain.nextCall(any())).thenThrow(new RuntimeException("模拟未知错误"));
 
-            AdvisedResponse response = advisor.aroundCall(req, chain);
+            ChatClientResponse response = advisor.adviseCall(req, chain);
 
-            String text = response.response().getResult().getOutput().getText();
+            String text = response.chatResponse().getResult().getOutput().getText();
             assertThat(text).isEqualTo(ErrorCode.SYSTEM_ERROR.getMessage());
         }
 
         /**
          * 目的：流式路径中 BusinessException 通过 .onErrorResume 降级为一条友好消息。
          * 实现：构造 Flux.error(BusinessException) → aroundStream → StepVerifier 断言降级消息内容。
-         * 结果：仅 emit 1 个 AdvisedResponse，文本为对应 ErrorCode 的 message。
+         * 结果：仅 emit 1 个 ChatClientResponse，文本为对应 ErrorCode 的 message。
          */
         @Test
         @DisplayName("流式：异常 → 降级为单条友好消息")
         void streamException_returnsFallback() {
-            AdvisedRequest req = requestWithUserText("test");
-            StreamAroundAdvisorChain chain = r ->
-                    Flux.error(new BusinessException(ErrorCode.MESSAGE_TOO_LONG));
+            ChatClientRequest req = requestWithUserText("test");
+            StreamAdvisorChain chain = mock(StreamAdvisorChain.class);
+            when(chain.nextStream(any()))
+                    .thenReturn(Flux.error(new BusinessException(ErrorCode.MESSAGE_TOO_LONG)));
 
-            Flux<AdvisedResponse> result = advisor.aroundStream(req, chain);
+            Flux<ChatClientResponse> result = advisor.adviseStream(req, chain);
 
             StepVerifier.create(result)
                     .assertNext(r -> {
-                        String text = r.response().getResult().getOutput().getText();
+                        String text = r.chatResponse().getResult().getOutput().getText();
                         assertThat(text).isEqualTo(ErrorCode.MESSAGE_TOO_LONG.getMessage());
                     })
                     .verifyComplete();
@@ -397,15 +374,16 @@ class AdvisorTest {
         @Test
         @DisplayName("流式：未知异常 → 降级为内部错误消息")
         void streamUnknownError_returnsInternalError() {
-            AdvisedRequest req = requestWithUserText("test");
-            StreamAroundAdvisorChain chain = r ->
-                    Flux.error(new NullPointerException("模拟空指针"));
+            ChatClientRequest req = requestWithUserText("test");
+            StreamAdvisorChain chain = mock(StreamAdvisorChain.class);
+            when(chain.nextStream(any()))
+                    .thenReturn(Flux.error(new NullPointerException("模拟空指针")));
 
-            Flux<AdvisedResponse> result = advisor.aroundStream(req, chain);
+            Flux<ChatClientResponse> result = advisor.adviseStream(req, chain);
 
             StepVerifier.create(result)
                     .assertNext(r -> {
-                        String text = r.response().getResult().getOutput().getText();
+                        String text = r.chatResponse().getResult().getOutput().getText();
                         assertThat(text).isEqualTo(ErrorCode.SYSTEM_ERROR.getMessage());
                     })
                     .verifyComplete();

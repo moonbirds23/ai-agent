@@ -6,7 +6,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
-import org.springframework.ai.model.Media;
+import org.springframework.ai.content.Media;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.core.io.ByteArrayResource;
@@ -73,12 +73,13 @@ class VisionModelTest {
     @DisplayName("图片 URL → DeepSeek 视觉理解")
     void imageUrl_visionReturnDescription() throws Exception {
         URL imageUrl = new URL("https://upload.wikimedia.org/wikipedia/commons/thumb/4/47/PNG_transparency_demonstration_1.png/300px-PNG_transparency_demonstration_1.png");
+        java.net.URI imageUri = imageUrl.toURI();
 
         ChatClient client = ChatClient.builder(chatModel).build();
         ChatResponse response = client.prompt()
                 .user(spec -> spec
                         .text("请用中文简短描述这张图片里有什么")
-                        .media(new Media(MimeTypeUtils.IMAGE_PNG, imageUrl)))
+                        .media(new Media(MimeTypeUtils.IMAGE_PNG, imageUri)))
                 .call()
                 .chatResponse();
 

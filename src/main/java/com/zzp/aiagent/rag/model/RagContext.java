@@ -5,7 +5,9 @@ import com.zzp.aiagent.profile.model.PictureAiProfile;
 import com.zzp.aiagent.template.model.StyleTemplate;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * RAG 增强上下文，包含三层增强数据：明确参考图、RAG检索图、风格模板。
@@ -15,8 +17,8 @@ public class RagContext {
 
     private final List<ReferencePicture> explicitReferences = new ArrayList<>();
     private final List<ReferencePicture> retrievedReferences = new ArrayList<>();
+    private final Map<String, Object> trace = new LinkedHashMap<>();
     private StyleTemplate styleTemplate;
-    private String debugInfo = "";
 
     /**
      * 参考图组合：图库图片 + 可选的 AI 图片画像。
@@ -67,11 +69,14 @@ public class RagContext {
         return styleTemplate;
     }
 
-    public String getDebugInfo() {
-        return debugInfo;
+    public Map<String, Object> getTrace() {
+        return trace;
     }
 
-    public void setDebugInfo(String debugInfo) {
-        this.debugInfo = debugInfo;
+    public RagContext putTrace(String key, Object value) {
+        if (key != null && value != null) {
+            trace.put(key, value);
+        }
+        return this;
     }
 }

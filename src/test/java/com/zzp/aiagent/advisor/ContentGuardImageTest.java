@@ -4,15 +4,17 @@ import com.zzp.aiagent.exception.BusinessException;
 import com.zzp.aiagent.exception.ErrorCode;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.springframework.ai.chat.client.advisor.api.AdvisedRequest;
+import org.springframework.ai.chat.client.ChatClientRequest;
+import org.springframework.ai.chat.client.advisor.api.CallAdvisorChain;
 import org.springframework.ai.chat.messages.UserMessage;
-import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.prompt.Prompt;
-import org.springframework.ai.model.Media;
+import org.springframework.ai.content.Media;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.util.MimeTypeUtils;
 
 import java.util.HashMap;
+
+import static org.mockito.Mockito.mock;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -29,13 +31,11 @@ class ContentGuardImageTest {
 
     private final ContentGuardAdvisor advisor = new ContentGuardAdvisor();
 
-    private AdvisedRequest withMedia(List<Media> medias) {
-        UserMessage um = new UserMessage("hi", medias);
-        return AdvisedRequest.builder()
-                .chatModel(mock(ChatModel.class))
-                .userText("hi")
-                .messages(new Prompt(List.of(um)).getInstructions())
-                .adviseContext(new HashMap<>())
+    private ChatClientRequest withMedia(List<Media> medias) {
+        UserMessage um = UserMessage.builder().text("hi").media(medias).build();
+        return ChatClientRequest.builder()
+                .prompt(new Prompt(List.of(um)))
+                .context(new HashMap<>())
                 .build();
     }
 
@@ -51,9 +51,9 @@ class ContentGuardImageTest {
     @DisplayName("超过 5 张图片 → 抛 IMAGE_TOO_LARGE")
     void tooManyImages_rejected() {
         List<Media> six = List.of(media(10), media(10), media(10), media(10), media(10), media(10));
-        AdvisedRequest req = withMedia(six);
+        ChatClientRequest req = withMedia(six);
 
-        assertThatThrownBy(() -> advisor.aroundCall(req, chain -> null))
+        assertThatThrownBy(() -> advisor.adviseCall(req, mock(CallAdvisorChain.class)))
                 .isInstanceOf(BusinessException.class)
                 .extracting(e -> ((BusinessException) e).getCode())
                 .isEqualTo(ErrorCode.IMAGE_TOO_LARGE.getCode());
@@ -67,9 +67,9 @@ class ContentGuardImageTest {
     @DisplayName("单张图片超过 10MB → 抛 IMAGE_TOO_LARGE")
     void singleImageTooBig_rejected() {
         Media big = media(11 * 1024 * 1024);
-        AdvisedRequest req = withMedia(List.of(big));
+        ChatClientRequest req = withMedia(List.of(big));
 
-        assertThatThrownBy(() -> advisor.aroundCall(req, chain -> null))
+        assertThatThrownBy(() -> advisor.adviseCall(req, mock(CallAdvisorChain.class)))
                 .isInstanceOf(BusinessException.class)
                 .extracting(e -> ((BusinessException) e).getCode())
                 .isEqualTo(ErrorCode.IMAGE_TOO_LARGE.getCode());
@@ -82,9 +82,9 @@ class ContentGuardImageTest {
     @DisplayName("单张图片 10MB 边界 → 放行")
     void singleImageAtBoundary_passes() {
         Media exactly10 = media(10 * 1024 * 1024);
-        AdvisedRequest req = withMedia(List.of(exactly10));
+        ChatClientRequest req = withMedia(List.of(exactly10));
 
-        assertThatCode(() -> advisor.aroundCall(req, chain -> null))
+        assertThatCode(() -> advisor.adviseCall(req, mock(CallAdvisorChain.class)))
                 .doesNotThrowAnyException();
     }
 
@@ -97,6 +97,6 @@ class ContentGuardImageTest {
     @DisplayName("Spring AI 行为锚定：Media.getData() 是 byte[]")
     void mediaData_isByteArray_typeAnchor() {
         Media m = media(1024);
-        assertThat(m.getData()).isInstanceOf(byte[].class);
+        assertThat(m.getDataAsByteArray()).isInstanceOf(byte[].class);
     }
 }

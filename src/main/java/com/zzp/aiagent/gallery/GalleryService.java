@@ -1,6 +1,9 @@
 package com.zzp.aiagent.gallery;
 
-import com.zzp.aiagent.gallery.model.*;
+import com.zzp.aiagent.gallery.model.GalleryImportUrlRequest;
+import com.zzp.aiagent.gallery.model.GalleryPicture;
+import com.zzp.aiagent.gallery.model.GalleryQueryRequest;
+import com.zzp.aiagent.gallery.model.GalleryUploadRequest;
 
 import java.util.List;
 

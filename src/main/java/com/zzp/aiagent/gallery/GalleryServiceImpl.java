@@ -3,37 +3,49 @@ package com.zzp.aiagent.gallery;
 import com.zzp.aiagent.common.ThrowUtils;
 import com.zzp.aiagent.exception.BusinessException;
 import com.zzp.aiagent.exception.ErrorCode;
-import com.zzp.aiagent.gallery.model.*;
+import com.zzp.aiagent.gallery.model.GalleryImportUrlRequest;
+import com.zzp.aiagent.gallery.model.GalleryPicture;
+import com.zzp.aiagent.gallery.model.GalleryQueryRequest;
+import com.zzp.aiagent.gallery.model.GalleryUploadRequest;
 import com.zzp.aiagent.image.ImageDownloadService;
 import com.zzp.aiagent.model.dto.image.DownloadedImage;
-import lombok.RequiredArgsConstructor;
+import com.zzp.aiagent.profile.PictureAiProfileService;
+import com.zzp.aiagent.storage.ObjectStorageService;
+import com.zzp.aiagent.storage.model.StoredObject;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Service;
 
 import javax.imageio.ImageIO;
-import javax.imageio.ImageReader;
-import javax.imageio.stream.ImageInputStream;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.time.LocalDateTime;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Base64;
+import java.util.Collections;
+import java.util.List;
 import java.util.stream.Collectors;
 
 @Profile("!test")
 @Service
-@RequiredArgsConstructor
 @Slf4j
 public class GalleryServiceImpl implements GalleryService {
 
-    private static final Path IMAGE_DIR = Paths.get("gallery-data", "images");
-
     private final GalleryPictureRepository repository;
     private final ImageDownloadService imageDownloadService;
+    private final ObjectStorageService storageService;
+    private final PictureAiProfileService profileService;
+
+    public GalleryServiceImpl(GalleryPictureRepository repository,
+                              ImageDownloadService imageDownloadService,
+                              ObjectStorageService storageService,
+                              PictureAiProfileService profileService) {
+        this.repository = repository;
+        this.imageDownloadService = imageDownloadService;
+        this.storageService = storageService;
+        this.profileService = profileService;
+    }
 
     @Override
     public GalleryPicture upload(GalleryUploadRequest request) {
@@ -75,20 +87,14 @@ public class GalleryServiceImpl implements GalleryService {
 
         GalleryPicture saved = repository.save(picture);
 
-        // Save image file using the assigned id
-        try {
-            Files.createDirectories(IMAGE_DIR);
-            Path imagePath = IMAGE_DIR.resolve(saved.id() + "." + ext);
-            Files.write(imagePath, decoded.bytes());
-        } catch (IOException e) {
-            log.error("[GalleryService] 保存图片文件失败 id={}", saved.id(), e);
-            throw new BusinessException(ErrorCode.GALLERY_OPERATION_FAILED, "保存图片文件失败");
-        }
+        // Save image via object storage
+        String key = "gallery/" + saved.userId() + "/" + saved.id() + "/origin." + ext;
+        StoredObject stored = storageService.upload(decoded.bytes(), key,
+                contentTypeFromExt(ext));
 
-        // Update url to relative path
-        String url = "/api/gallery/files/" + saved.id();
+        // Update url from storage service
         GalleryPicture withUrl = new GalleryPicture(
-                saved.id(), url, saved.thumbnailUrl(), saved.name(),
+                saved.id(), stored.url(), saved.thumbnailUrl(), saved.name(),
                 saved.introduction(), saved.category(), saved.tags(),
                 saved.picSize(), saved.picWidth(), saved.picHeight(),
                 saved.picScale(), saved.picFormat(), saved.userId(),
@@ -100,6 +106,7 @@ public class GalleryServiceImpl implements GalleryService {
 
         log.info("[GalleryService] 上传成功 id={} name={} size={} format={}",
                 saved.id(), saved.name(), saved.picSize(), ext);
+        autoAnalyze(withUrl, decoded.bytes(), contentTypeFromExt(ext));
         return withUrl;
     }
 
@@ -140,18 +147,12 @@ public class GalleryServiceImpl implements GalleryService {
 
         GalleryPicture saved = repository.save(picture);
 
-        try {
-            Files.createDirectories(IMAGE_DIR);
-            Path imagePath = IMAGE_DIR.resolve(saved.id() + "." + ext);
-            Files.write(imagePath, downloaded.bytes());
-        } catch (IOException e) {
-            log.error("[GalleryService] 保存导入图片失败 id={}", saved.id(), e);
-            throw new BusinessException(ErrorCode.GALLERY_OPERATION_FAILED, "保存导入图片失败");
-        }
+        String key = "gallery/" + saved.userId() + "/" + saved.id() + "/origin." + ext;
+        StoredObject stored = storageService.upload(downloaded.bytes(), key,
+                contentTypeFromExt(ext));
 
-        String url = "/api/gallery/files/" + saved.id();
         GalleryPicture withUrl = new GalleryPicture(
-                saved.id(), url, saved.thumbnailUrl(), saved.name(),
+                saved.id(), stored.url(), saved.thumbnailUrl(), saved.name(),
                 saved.introduction(), saved.category(), saved.tags(),
                 saved.picSize(), saved.picWidth(), saved.picHeight(),
                 saved.picScale(), saved.picFormat(), saved.userId(),
@@ -163,6 +164,7 @@ public class GalleryServiceImpl implements GalleryService {
 
         log.info("[GalleryService] URL导入成功 id={} name={} url={}",
                 saved.id(), saved.name(), request.imageUrl());
+        autoAnalyze(withUrl, downloaded.bytes(), downloaded.contentType());
         return withUrl;
     }
 
@@ -244,16 +246,31 @@ public class GalleryServiceImpl implements GalleryService {
         GalleryPicture existing = getById(id);
         repository.deleteById(id);
 
-        // Delete the image file
-        try {
-            String ext = existing.picFormat() != null ? existing.picFormat() : "png";
-            Path imagePath = IMAGE_DIR.resolve(id + "." + ext);
-            Files.deleteIfExists(imagePath);
-        } catch (IOException e) {
-            log.warn("[GalleryService] 删除图片文件失败 id={}", id, e);
-        }
+        String ext = existing.picFormat() != null ? existing.picFormat() : "png";
+        String key = "gallery/" + existing.userId() + "/" + id + "/origin." + ext;
+        storageService.delete(key);
 
         log.info("[GalleryService] 删除成功 id={}", id);
+    }
+
+    private static String contentTypeFromExt(String ext) {
+        return switch (ext.toLowerCase()) {
+            case "jpg", "jpeg" -> "image/jpeg";
+            case "webp" -> "image/webp";
+            case "gif" -> "image/gif";
+            case "bmp" -> "image/bmp";
+            default -> "image/png";
+        };
+    }
+
+    private void autoAnalyze(GalleryPicture picture, byte[] imageBytes, String contentType) {
+        try {
+            profileService.analyzeDirect(picture, imageBytes, contentType);
+            log.info("[GalleryService] 自动AI画像分析完成 pictureId={}", picture.id());
+        } catch (Exception e) {
+            log.warn("[GalleryService] 自动AI画像分析失败 pictureId={}, 需手动分析: {}",
+                    picture.id(), e.getMessage());
+        }
     }
 
     // ---- Base64 helpers ----

@@ -1,4 +1,4 @@
-package com.zzp.aiagent.knowledge.config;
+package com.zzp.aiagent.config;
 
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.vectorstore.SimpleVectorStore;
@@ -11,16 +11,16 @@ import java.io.File;
 import java.nio.file.Path;
 
 @Component
-@Profile("!test")
+@Profile("!test & !postgres")
 @Slf4j
 public class VectorStorePersistence {
 
     private final SimpleVectorStore store;
     private final File saveFile;
 
-    public VectorStorePersistence(VectorStore knowledgeVectorStore) {
-        this.saveFile = Path.of("./kb-data", "vector-store.json").toFile();
-        if (knowledgeVectorStore instanceof SimpleVectorStore svs) {
+    public VectorStorePersistence(VectorStore vectorStore) {
+        this.saveFile = Path.of("./data", "vector-store.json").toFile();
+        if (vectorStore instanceof SimpleVectorStore svs) {
             this.store = svs;
             if (saveFile.exists() && saveFile.length() > 0) {
                 store.load(saveFile);

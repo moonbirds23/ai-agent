@@ -6,9 +6,9 @@ import com.zzp.aiagent.exception.ErrorCode;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
-import org.springframework.ai.chat.client.advisor.api.AdvisedRequest;
-import org.springframework.ai.chat.client.advisor.api.AdvisedResponse;
-import org.springframework.ai.chat.client.advisor.api.StreamAroundAdvisorChain;
+import org.springframework.ai.chat.client.ChatClientRequest;
+import org.springframework.ai.chat.client.ChatClientResponse;
+import org.springframework.ai.chat.client.advisor.api.StreamAdvisorChain;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatModel;
@@ -38,22 +38,20 @@ import static org.mockito.Mockito.when;
 @DisplayName("Advisor 流式路径 (aroundStream)")
 class AdvisorStreamTest {
 
-    private static AdvisedRequest requestWithText(String text) {
+    private static ChatClientRequest requestWithText(String text) {
         Prompt prompt = text != null
                 ? new Prompt(List.of(new UserMessage(text)))
                 : new Prompt(List.of(new UserMessage("")));
-        return AdvisedRequest.builder()
-                .chatModel(mock(ChatModel.class))
-                .userText(text)
-                .messages(prompt.getInstructions())
-                .adviseContext(new HashMap<>())
+        return ChatClientRequest.builder()
+                .prompt(prompt)
+                .context(new HashMap<>())
                 .build();
     }
 
-    private static AdvisedResponse emptyResponse() {
-        return AdvisedResponse.builder()
-                .response(new ChatResponse(List.of(new Generation(new AssistantMessage("ok")))))
-                .adviseContext(new HashMap<>())
+    private static ChatClientResponse emptyResponse() {
+        return ChatClientResponse.builder()
+                .chatResponse(new ChatResponse(List.of(new Generation(new AssistantMessage("ok")))))
+                .context(new HashMap<>())
                 .build();
     }
 
@@ -68,17 +66,17 @@ class AdvisorStreamTest {
         /**
          * 目的：合法消息在流式路径下仍正常放行。
          * 实现：合法消息 → mock chain 返回 Flux.just(chunk) → aroundStream → StepVerifier 验证。
-         * 结果：流 emit 1 个 AdvisedResponse 后完成，内容等于预期 chunk。
+         * 结果：流 emit 1 个 ChatClientResponse 后完成，内容等于预期 chunk。
          */
         @Test
         @DisplayName("合法消息 → 流正常放行")
         void validMessage_streamPassesThrough() {
-            AdvisedRequest req = requestWithText("雪景图");
-            StreamAroundAdvisorChain chain = mock(StreamAroundAdvisorChain.class);
-            AdvisedResponse chunk = emptyResponse();
-            when(chain.nextAroundStream(req)).thenReturn(Flux.just(chunk));
+            ChatClientRequest req = requestWithText("雪景图");
+            StreamAdvisorChain chain = mock(StreamAdvisorChain.class);
+            ChatClientResponse chunk = emptyResponse();
+            when(chain.nextStream(req)).thenReturn(Flux.just(chunk));
 
-            Flux<AdvisedResponse> result = advisor.aroundStream(req, chain);
+            Flux<ChatClientResponse> result = advisor.adviseStream(req, chain);
 
             StepVerifier.create(result)
                     .assertNext(r -> assertThat(r).isEqualTo(chunk))
@@ -94,10 +92,10 @@ class AdvisorStreamTest {
         @Test
         @DisplayName("空消息流 → 返回 Flux.error(BusinessException)")
         void emptyMessage_returnsFluxError() {
-            AdvisedRequest req = requestWithText("");
-            StreamAroundAdvisorChain chain = mock(StreamAroundAdvisorChain.class);
+            ChatClientRequest req = requestWithText("");
+            StreamAdvisorChain chain = mock(StreamAdvisorChain.class);
 
-            StepVerifier.create(advisor.aroundStream(req, chain))
+            StepVerifier.create(advisor.adviseStream(req, chain))
                     .expectErrorMatches(e -> e instanceof BusinessException be
                             && be.getCode() == ErrorCode.EMPTY_MESSAGE.getCode())
                     .verify();
@@ -110,10 +108,10 @@ class AdvisorStreamTest {
         @Test
         @DisplayName("敏感词流 → 返回 Flux.error(BusinessException)")
         void blockedKeyword_returnsFluxError() {
-            AdvisedRequest req = requestWithText("暴力内容");
-            StreamAroundAdvisorChain chain = mock(StreamAroundAdvisorChain.class);
+            ChatClientRequest req = requestWithText("暴力内容");
+            StreamAdvisorChain chain = mock(StreamAdvisorChain.class);
 
-            StepVerifier.create(advisor.aroundStream(req, chain))
+            StepVerifier.create(advisor.adviseStream(req, chain))
                     .expectErrorMatches(e -> e instanceof BusinessException be
                             && be.getCode() == ErrorCode.CONTENT_BLOCKED.getCode())
                     .verify();
@@ -136,20 +134,20 @@ class AdvisorStreamTest {
         @Test
         @DisplayName("正常消息 → 改写 userText，每个 chunk 注入 optimizedPrompt")
         void normalMessage_enhancesAndAttachesPerChunk() {
-            AdvisedRequest req = requestWithText("冬日雪景");
-            StreamAroundAdvisorChain chain = mock(StreamAroundAdvisorChain.class);
-            AdvisedResponse chunk = emptyResponse();
-            when(chain.nextAroundStream(any())).thenReturn(Flux.just(chunk, chunk));
+            ChatClientRequest req = requestWithText("冬日雪景");
+            StreamAdvisorChain chain = mock(StreamAdvisorChain.class);
+            ChatClientResponse chunk = emptyResponse();
+            when(chain.nextStream(any())).thenReturn(Flux.just(chunk, chunk));
 
-            Flux<AdvisedResponse> result = advisor.aroundStream(req, chain);
+            Flux<ChatClientResponse> result = advisor.adviseStream(req, chain);
 
             StepVerifier.create(result)
                     .assertNext(r -> {
-                        String optimized = (String) r.adviseContext().get("optimizedPrompt");
+                        String optimized = (String) r.context().get("optimizedPrompt");
                         assertThat(optimized).contains("画面主体", "环境背景", "冬日雪景");
                     })
                     .assertNext(r -> {
-                        String optimized = (String) r.adviseContext().get("optimizedPrompt");
+                        String optimized = (String) r.context().get("optimizedPrompt");
                         assertThat(optimized).contains("冬日雪景");
                     })
                     .verifyComplete();
@@ -163,18 +161,18 @@ class AdvisorStreamTest {
         @Test
         @DisplayName("空消息 → 不做改写，流透传（adviseContext 仍会注入 optimizedPrompt）")
         void emptyMessage_passesThrough() {
-            AdvisedRequest req = requestWithText("");
-            StreamAroundAdvisorChain chain = mock(StreamAroundAdvisorChain.class);
-            AdvisedResponse chunk = emptyResponse();
-            when(chain.nextAroundStream(any())).thenReturn(Flux.just(chunk));
+            ChatClientRequest req = requestWithText("");
+            StreamAdvisorChain chain = mock(StreamAdvisorChain.class);
+            ChatClientResponse chunk = emptyResponse();
+            when(chain.nextStream(any())).thenReturn(Flux.just(chunk));
 
-            Flux<AdvisedResponse> result = advisor.aroundStream(req, chain);
+            Flux<ChatClientResponse> result = advisor.adviseStream(req, chain);
 
             StepVerifier.create(result)
                     .assertNext(r -> {
-                        String text = r.response().getResult().getOutput().getText();
+                        String text = r.chatResponse().getResult().getOutput().getText();
                         assertThat(text).isEqualTo("ok");
-                        assertThat(r.adviseContext()).containsKey("optimizedPrompt");
+                        assertThat(r.context()).containsKey("optimizedPrompt");
                     })
                     .verifyComplete();
         }

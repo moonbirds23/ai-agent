@@ -9,12 +9,13 @@ import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
-import org.springframework.ai.model.Media;
+import org.springframework.ai.content.Media;
 import org.springframework.context.annotation.Profile;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 import org.springframework.util.MimeTypeUtils;
 
+import java.net.URI;
 import java.net.URL;
 import java.time.Duration;
 import java.util.Collections;
@@ -36,9 +37,9 @@ public class RedisChatMemory implements ChatMemory {
     private final StringRedisTemplate redis;
     private final ObjectMapper mapper;
 
-    public RedisChatMemory(StringRedisTemplate redis) {
+    public RedisChatMemory(StringRedisTemplate redis, ObjectMapper mapper) {
         this.redis = redis;
-        this.mapper = new ObjectMapper();
+        this.mapper = mapper;
     }
 
     @Override
@@ -62,14 +63,9 @@ public class RedisChatMemory implements ChatMemory {
     }
 
     @Override
-    public List<Message> get(String conversationId, int lastN) {
+    public List<Message> get(String conversationId) {
         String key = key(conversationId);
-        long len = redis.opsForList().size(key);
-        if (len == 0) {
-            return Collections.emptyList();
-        }
-        long start = Math.max(0, len - lastN);
-        List<String> jsonList = redis.opsForList().range(key, start, -1);
+        List<String> jsonList = redis.opsForList().range(key, 0, -1);
         if (jsonList == null || jsonList.isEmpty()) {
             return Collections.emptyList();
         }
@@ -116,13 +112,13 @@ public class RedisChatMemory implements ChatMemory {
                     List<Media> media = record.mediaUrls().stream()
                             .map(url -> {
                                 try {
-                                    return new Media(MimeTypeUtils.IMAGE_PNG, new URL(url));
+                                    return new Media(MimeTypeUtils.IMAGE_PNG, new URL(url).toURI());
                                 } catch (Exception e) {
                                     throw new RuntimeException("无效的图片URL: " + url, e);
                                 }
                             })
                             .toList();
-                    yield new UserMessage(record.content(), media);
+                    yield UserMessage.builder().text(record.content()).media(media).build();
                 }
                 yield new UserMessage(record.content());
             }

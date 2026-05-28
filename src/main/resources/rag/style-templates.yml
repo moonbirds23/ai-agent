@@ -1,0 +1,89 @@
+app:
+  template:
+    styles:
+      - code: ppt-business-flat
+        name: PPT 商务扁平插画
+        scene: work_study
+        category: ppt
+        keywords: [PPT, 商务, 汇报, 数据, 职场, 扁平]
+        prompt: "扁平矢量插画风格，清晰的信息层级，干净背景，低噪声构图，适合 PPT 页面留白，蓝绿点缀色，画面主体明确，不要复杂纹理。"
+        negativePrompt: "避免过度写实，避免杂乱背景，避免小字和复杂 UI 截图。"
+        suggestedDimensions: "16:9"
+
+      - code: ppt-tech-isometric
+        name: PPT 科技等距插画
+        scene: work_study
+        category: ppt
+        keywords: [科技, AI, 系统架构, 云服务, 数据平台, 数字化]
+        prompt: "等距 3D 插画，科技蓝与青色点缀，模块化结构，适合表达系统、数据流、云平台和 AI 能力。"
+        suggestedDimensions: "16:9"
+
+      - code: ppt-data-report
+        name: PPT 数据报告背景
+        scene: work_study
+        category: ppt
+        keywords: [数据, 报表, 图表, 统计, 可视化, 仪表盘]
+        prompt: "简约数据可视化风格，浅色背景，几何线条分割，蓝灰配色，适合放图表和文字，留白充足。"
+        suggestedDimensions: "16:9"
+
+      - code: children-illustration
+        name: 儿童绘本插画
+        scene: creative
+        category: illustration
+        keywords: [儿童, 绘本, 可爱, 童话, 动物, 温暖, 教育]
+        prompt: "柔和温暖的儿童绘本风格，圆润造型，温暖色彩（淡黄、浅绿、粉红），可爱动物或人物，简单场景，适合亲子阅读画面。"
+        negativePrompt: "避免尖锐线条，避免暗黑主题，避免复杂细节。"
+        suggestedDimensions: "1:1"
+
+      - code: japanese-fresh-life
+        name: 日系清新生活记录
+        scene: life
+        category: photography
+        keywords: [日系, 清新, 生活, 日常, 胶片, 温暖, 自然光]
+        prompt: "日系清新摄影风格，柔和自然光，低饱和度，略微过曝，胶片质感，生活场景自然抓拍感，浅景深。"
+        negativePrompt: "避免过度修图痕迹，避免强对比度，避免浓重色彩。"
+        suggestedDimensions: "3:4"
+
+      - code: realistic-product
+        name: 写实产品摄影
+        scene: work_study
+        category: photography
+        keywords: [产品, 摄影, 写实, 商业, 电商, 白底, 棚拍]
+        prompt: "商业产品摄影风格，干净白色背景，专业棚拍布光，高清晰度，细节锐利，产品质感突出。"
+        negativePrompt: "避免杂乱背景，避免影棚设备穿帮。"
+        suggestedDimensions: "1:1"
+
+      - code: guochao-festival
+        name: 国潮节日海报
+        scene: creative
+        category: poster
+        keywords: [国潮, 节日, 春节, 中秋, 红色, 中国风, 传统, 喜庆]
+        prompt: "国潮插画风格，中国传统元素与现代设计融合，红金配色，祥云、花鸟、古典纹样点缀，节日喜庆氛围。"
+        negativePrompt: "避免过于传统老旧，避免沉闷配色。"
+        suggestedDimensions: "9:16"
+
+      - code: cute-sticker
+        name: 社交媒体可爱贴纸风
+        scene: creative
+        category: social
+        keywords: [贴纸, 可爱, 表情, 社交媒体, 卡通, 手绘, 涂鸦]
+        prompt: "可爱手绘贴纸风格，粗线条描边，明亮色彩，Q版造型，表情生动，适合社交媒体配图和小红书风格。"
+        suggestedDimensions: "1:1"
+
+      - code: minimalist-lineart
+        name: 极简线稿图标风
+        scene: creative
+        category: icon
+        keywords: [极简, 线条, 黑白, 图标, UI, 素描, 涂鸦]
+        prompt: "极简黑白线稿风格，干净利落的线条，留白充足，适合图标、UI插画、说明书配图。"
+        negativePrompt: "避免复杂阴影，避免色彩填充，避免写实质感。"
+        suggestedDimensions: "1:1"
+
+      - code: threed-soft-glass
+        name: 3D 柔和毛玻璃风
+        scene: creative
+        category: threed
+        keywords: [3D, 玻璃, 透明, 科技, 柔光, 渐变, UI, 现代]
+        prompt: "3D 柔和玻璃材质风格，半透明磨砂质感，柔光渐变背景（粉紫、蓝紫、桃色），现代 UI 设计感，圆润几何造型。"
+        negativePrompt: "避免硬边阴影，避免完全不透明材质。"
+        suggestedDimensions: "16:9"

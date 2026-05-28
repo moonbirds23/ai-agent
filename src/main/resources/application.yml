@@ -33,7 +33,7 @@ app:
   rag:
     enabled: true
     top-k: 5
-    min-score: 0.65
+    min-score: 0.4
     max-context-chars: 2500
     retrieve-favorites-only: true
 

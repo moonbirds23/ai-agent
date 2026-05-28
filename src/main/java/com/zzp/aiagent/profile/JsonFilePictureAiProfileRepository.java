@@ -19,7 +19,7 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.stream.Collectors;
 
 @Component
-@Profile("!test")
+@Profile("!test & !postgres")
 @Slf4j
 public class JsonFilePictureAiProfileRepository implements PictureAiProfileRepository {
 
@@ -30,9 +30,8 @@ public class JsonFilePictureAiProfileRepository implements PictureAiProfileRepos
     private final Map<Long, PictureAiProfile> cache;
     private final ReentrantReadWriteLock lock;
 
-    public JsonFilePictureAiProfileRepository() {
-        this.mapper = new ObjectMapper();
-        this.mapper.registerModule(new JavaTimeModule());
+    public JsonFilePictureAiProfileRepository(ObjectMapper mapper) {
+        this.mapper = mapper;
         this.cache = new ConcurrentHashMap<>();
         this.lock = new ReentrantReadWriteLock();
         loadFromDisk();

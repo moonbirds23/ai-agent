@@ -3,6 +3,7 @@ package com.zzp.aiagent.app;
 import com.zzp.aiagent.common.PromptTemplate;
 import com.zzp.aiagent.image.ImageGenerationService;
 import com.zzp.aiagent.image.VisionAnalysisService;
+import com.zzp.aiagent.gallery.GalleryService;
 import com.zzp.aiagent.rag.PromptReferenceAssembler;
 import com.zzp.aiagent.rag.RagService;
 import com.zzp.aiagent.model.dto.chat.ChatRequest;
@@ -11,7 +12,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.messages.AssistantMessage;
-import org.springframework.ai.chat.memory.InMemoryChatMemory;
+import org.springframework.ai.chat.memory.InMemoryChatMemoryRepository;
+import org.springframework.ai.chat.memory.MessageWindowChatMemory;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
@@ -51,8 +53,14 @@ class PictureAppMultiTurnTest {
         when(ragService.buildContext(any())).thenReturn(com.zzp.aiagent.rag.model.RagContext.empty());
         PromptReferenceAssembler assembler = mock(PromptReferenceAssembler.class);
         when(assembler.assemble(any(), any())).thenAnswer(inv -> inv.getArgument(0));
-        pictureApp = new PictureApp(chatModel, new InMemoryChatMemory(), new PromptTemplate(),
-                mock(ImageGenerationService.class), mock(VisionAnalysisService.class), ragService, assembler);
+        GalleryService galleryService = mock(GalleryService.class);
+        pictureApp = new PictureApp(chatModel, MessageWindowChatMemory.builder()
+                .chatMemoryRepository(new InMemoryChatMemoryRepository())
+                .maxMessages(100)
+                .build(), new PromptTemplate(),
+                new com.fasterxml.jackson.databind.ObjectMapper(),
+                mock(ImageGenerationService.class), mock(VisionAnalysisService.class), ragService, assembler,
+                galleryService);
     }
 
     private static ChatRequest req(String message) {

@@ -5,6 +5,7 @@ import com.zzp.aiagent.exception.BusinessException;
 import com.zzp.aiagent.exception.ErrorCode;
 import com.zzp.aiagent.image.ImageGenerationService;
 import com.zzp.aiagent.image.VisionAnalysisService;
+import com.zzp.aiagent.gallery.GalleryService;
 import com.zzp.aiagent.rag.PromptReferenceAssembler;
 import com.zzp.aiagent.rag.RagService;
 import com.zzp.aiagent.model.dto.chat.ChatRequest;
@@ -18,12 +19,13 @@ import org.mockito.ArgumentCaptor;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.UserMessage;
-import org.springframework.ai.chat.memory.InMemoryChatMemory;
+import org.springframework.ai.chat.memory.InMemoryChatMemoryRepository;
+import org.springframework.ai.chat.memory.MessageWindowChatMemory;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.chat.prompt.Prompt;
-import org.springframework.ai.model.Media;
+import org.springframework.ai.content.Media;
 
 import java.util.Base64;
 import java.util.List;
@@ -54,6 +56,7 @@ class PictureAppMultimodalTest {
     private VisionAnalysisService visionAnalysisService;
     private RagService ragService;
     private PromptReferenceAssembler assembler;
+    private GalleryService galleryService;
     private PictureApp pictureApp;
 
     @BeforeEach
@@ -63,10 +66,15 @@ class PictureAppMultimodalTest {
         visionAnalysisService = mock(VisionAnalysisService.class);
         ragService = mock(RagService.class);
         assembler = mock(PromptReferenceAssembler.class);
+        galleryService = mock(GalleryService.class);
         when(ragService.buildContext(any())).thenReturn(com.zzp.aiagent.rag.model.RagContext.empty());
         when(assembler.assemble(any(), any())).thenAnswer(inv -> inv.getArgument(0));
-        pictureApp = new PictureApp(chatModel, new InMemoryChatMemory(), new PromptTemplate(),
-                imageGenService, visionAnalysisService, ragService, assembler);
+        pictureApp = new PictureApp(chatModel, MessageWindowChatMemory.builder()
+                .chatMemoryRepository(new InMemoryChatMemoryRepository())
+                .maxMessages(100)
+                .build(), new PromptTemplate(),
+                new com.fasterxml.jackson.databind.ObjectMapper(),
+                imageGenService, visionAnalysisService, ragService, assembler, galleryService);
     }
 
     private static String jsonChat(String message) {

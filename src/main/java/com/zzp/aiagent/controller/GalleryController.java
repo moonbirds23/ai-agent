@@ -2,10 +2,13 @@ package com.zzp.aiagent.controller;
 
 import com.zzp.aiagent.common.BaseResponse;
 import com.zzp.aiagent.common.ResultUtils;
-import com.zzp.aiagent.common.ThrowUtils;
 import com.zzp.aiagent.exception.ErrorCode;
 import com.zzp.aiagent.gallery.GalleryService;
-import com.zzp.aiagent.gallery.model.*;
+import com.zzp.aiagent.gallery.model.GalleryImportUrlRequest;
+import com.zzp.aiagent.gallery.model.GalleryPicture;
+import com.zzp.aiagent.gallery.model.GalleryQueryRequest;
+import com.zzp.aiagent.gallery.model.GalleryUploadRequest;
+import com.zzp.aiagent.storage.ObjectStorageService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
@@ -13,12 +16,15 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Profile;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
 
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.List;
 
 @Profile("!test")
@@ -29,9 +35,8 @@ import java.util.List;
 @Slf4j
 public class GalleryController {
 
-    private static final Path IMAGE_DIR = Paths.get("gallery-data", "images");
-
     private final GalleryService galleryService;
+    private final ObjectStorageService storageService;
 
     @PostMapping("/upload")
     @Operation(summary = "上传图片(Base64)", description = "上传Base64编码的图片到图库")
@@ -83,33 +88,26 @@ public class GalleryController {
     @GetMapping("/files/{pictureId}")
     @Operation(summary = "获取图片文件", description = "根据图片ID返回图片文件二进制数据")
     public ResponseEntity<byte[]> serveFile(@PathVariable Long pictureId) {
-        // serveFile is a file-serving endpoint that returns raw bytes, so ResponseEntity is appropriate here
         GalleryPicture picture = galleryService.getById(pictureId);
         String ext = picture.picFormat() != null ? picture.picFormat() : "png";
-        Path imagePath = IMAGE_DIR.resolve(pictureId + "." + ext);
 
-        if (!Files.exists(imagePath)) {
-            // Try common extensions
-            for (String tryExt : List.of("png", "jpg", "jpeg", "webp", "gif", "bmp")) {
-                Path alt = IMAGE_DIR.resolve(pictureId + "." + tryExt);
-                if (Files.exists(alt)) {
-                    imagePath = alt;
-                    ext = tryExt;
-                    break;
-                }
+        byte[] bytes = null;
+        for (String tryExt : List.of(ext, "png", "jpg", "jpeg", "webp", "gif", "bmp")) {
+            try {
+                bytes = storageService.download(pictureId + "." + tryExt);
+                ext = tryExt;
+                break;
+            } catch (Exception ignored) {
             }
         }
 
-        ThrowUtils.throwIf(!Files.exists(imagePath), ErrorCode.PARAMS_ERROR, "图片文件不存在");
-
-        try {
-            byte[] bytes = Files.readAllBytes(imagePath);
-            MediaType mediaType = mediaTypeForExt(ext);
-            return ResponseEntity.ok().contentType(mediaType).body(bytes);
-        } catch (IOException e) {
-            log.error("[GalleryController] 读取图片文件失败 pictureId={}", pictureId, e);
-            throw new com.zzp.aiagent.exception.BusinessException(ErrorCode.GALLERY_OPERATION_FAILED, "读取图片文件失败");
+        if (bytes == null) {
+            log.error("[GalleryController] 图片文件不存在 pictureId={}", pictureId);
+            throw new com.zzp.aiagent.exception.BusinessException(ErrorCode.GALLERY_OPERATION_FAILED, "图片文件不存在");
         }
+
+        MediaType mediaType = mediaTypeForExt(ext);
+        return ResponseEntity.ok().contentType(mediaType).body(bytes);
     }
 
     private MediaType mediaTypeForExt(String ext) {

@@ -9,6 +9,10 @@ import com.zzp.aiagent.common.PromptTemplate;
 import com.zzp.aiagent.common.ThrowUtils;
 import com.zzp.aiagent.exception.BusinessException;
 import com.zzp.aiagent.exception.ErrorCode;
+import com.zzp.aiagent.gallery.GalleryService;
+import com.zzp.aiagent.gallery.model.GalleryImportUrlRequest;
+import com.zzp.aiagent.gallery.model.GalleryPicture;
+import com.zzp.aiagent.gallery.model.GalleryUploadRequest;
 import com.zzp.aiagent.image.ImageGenerationService;
 import com.zzp.aiagent.image.VisionAnalysisService;
 import com.zzp.aiagent.model.dto.chat.ChatRequest;
@@ -28,7 +32,7 @@ import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.converter.BeanOutputConverter;
-import org.springframework.ai.model.Media;
+import org.springframework.ai.content.Media;
 import org.springframework.context.annotation.Profile;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.stereotype.Component;
@@ -58,24 +62,28 @@ public class PictureApp {
     private final VisionAnalysisService visionAnalysisService;
     private final RagService ragService;
     private final PromptReferenceAssembler assembler;
+    private final GalleryService galleryService;
 
     public PictureApp(ChatModel openAiChatModel, ChatMemory chatMemory, PromptTemplate promptTemplate,
-                      ImageGenerationService imageGenerationService, VisionAnalysisService visionAnalysisService,
-                      RagService ragService, PromptReferenceAssembler assembler) {
+                      ObjectMapper objectMapper, ImageGenerationService imageGenerationService,
+                      VisionAnalysisService visionAnalysisService,
+                      RagService ragService, PromptReferenceAssembler assembler,
+                      GalleryService galleryService) {
         this.chatMemory = chatMemory;
         this.outputConverter = new BeanOutputConverter<>(ImageAgentResponse.class);
-        this.objectMapper = new ObjectMapper();
+        this.objectMapper = objectMapper;
         this.imageGenerationService = imageGenerationService;
         this.visionAnalysisService = visionAnalysisService;
         this.ragService = ragService;
         this.assembler = assembler;
+        this.galleryService = galleryService;
         String systemPrompt = promptTemplate.render("default", "system",
                 "outputFormat", outputConverter.getFormat());
         this.chatClient = ChatClient.builder(openAiChatModel)
                 .defaultSystem(systemPrompt)
                 .defaultAdvisors(
                         new ContentGuardAdvisor(),
-                        new MessageChatMemoryAdvisor(chatMemory),
+                        MessageChatMemoryAdvisor.builder(chatMemory).build(),
                         new PromptOptimizeAdvisor(promptTemplate),
                         new LoggingAdvisor(),
                         new ExceptionGuardAdvisor()
@@ -100,8 +108,8 @@ public class PictureApp {
         ImageAgentResponse aiResp = chatClient.prompt()
                 .user(buildUserSpec(request))
                 .advisors(spec -> spec
-                        .param(MessageChatMemoryAdvisor.CHAT_MEMORY_CONVERSATION_ID_KEY, chatId)
-                        .param(MessageChatMemoryAdvisor.CHAT_MEMORY_RETRIEVE_SIZE_KEY, 10)
+                        .param(ChatMemory.CONVERSATION_ID, chatId)
+                        .param("chat_memory_retrieve_size", 10)
                         .param("chatId", chatId))
                 .call()
                 .entity(outputConverter);
@@ -119,25 +127,30 @@ public class PictureApp {
         return data;
     }
 
-    // ── 生成模式 ──────────────────────────────────────────────────
+    // ── RAG 共同逻辑 ──────────────────────────────────────────────
 
-    private ChatResponseVO handleGeneration(ChatRequest request, String chatId) {
+    private record RagPrepared(String augmentedMsg, Object debugData) {}
+
+    private RagPrepared prepareRagContext(ChatRequest request, String chatId, String logTag) {
         String msg = request.message() != null && !request.message().isBlank()
                 ? request.message()
                 : "基于以上对话内容，请生成最终的图片生成参数";
-
-        // RAG 三层增强：明确参考图 → RAG检索 → 风格模板
         RagContext ragCtx = ragService.buildContext(request);
-        String ragDebugInfo = assembler.buildDebugInfo(ragCtx);
-        log.info("[RAG] 上下文构建完成 chatId={}:\n{}", chatId, ragDebugInfo);
+        log.info("[{}] 上下文构建完成 chatId={}:\n{}", logTag, chatId, assembler.buildDebugInfo(ragCtx));
         String augmentedMsg = assembler.assemble(msg, ragCtx);
-        Object ragDebugData = assembler.buildDebugData(ragCtx, augmentedMsg);
+        return new RagPrepared(augmentedMsg, assembler.buildDebugData(ragCtx, augmentedMsg));
+    }
+
+    // ── 生成模式 ──────────────────────────────────────────────────
+
+    private ChatResponseVO handleGeneration(ChatRequest request, String chatId) {
+        RagPrepared rag = prepareRagContext(request, chatId, "RAG");
 
         ImageAgentResponse aiResp = chatClient.prompt()
-                .user(augmentedMsg)
+                .user(rag.augmentedMsg)
                 .advisors(spec -> spec
-                        .param(MessageChatMemoryAdvisor.CHAT_MEMORY_CONVERSATION_ID_KEY, chatId)
-                        .param(MessageChatMemoryAdvisor.CHAT_MEMORY_RETRIEVE_SIZE_KEY, 50)
+                        .param(ChatMemory.CONVERSATION_ID, chatId)
+                        .param("chat_memory_retrieve_size", 50)
                         .param("chatId", chatId))
                 .call()
                 .entity(outputConverter);
@@ -145,14 +158,13 @@ public class PictureApp {
         ImageGenerationResult genResult = imageGenerationService.generate(
                 aiResp.imagePrompt(), aiResp.style(), aiResp.dimensions());
 
-        // TODO: 如果 saveGeneratedToGallery=true，保存生成的图片到图库
         if (Boolean.TRUE.equals(request.saveGeneratedToGallery())) {
-            log.info("[RAG] saveGeneratedToGallery=true chatId={}，待实现图库保存逻辑", chatId);
+            saveToGallery(aiResp, genResult, chatId);
         }
 
         return ChatResponseVO.imageGenerated(chatId, genResult.imageUrl(), genResult.imageBase64(),
                 aiResp.message(), aiResp.imagePrompt(), aiResp.style(), aiResp.dimensions(), aiResp.revisedPrompt(),
-                ragDebugData);
+                rag.debugData);
     }
 
     // ── 流式入口 ──────────────────────────────────────────────────
@@ -174,8 +186,8 @@ public class PictureApp {
         Flux<StreamEventVO> tokenFlux = chatClient.prompt()
                 .user(buildUserSpec(request))
                 .advisors(spec -> spec
-                        .param(MessageChatMemoryAdvisor.CHAT_MEMORY_CONVERSATION_ID_KEY, chatId)
-                        .param(MessageChatMemoryAdvisor.CHAT_MEMORY_RETRIEVE_SIZE_KEY, 10)
+                        .param(ChatMemory.CONVERSATION_ID, chatId)
+                        .param("chat_memory_retrieve_size", 10)
                         .param("chatId", chatId))
                 .stream()
                 .content()
@@ -238,41 +250,34 @@ public class PictureApp {
     // ── 流式生成模式 ──────────────────────────────────────────────
 
     private Flux<StreamEventVO> handleGenerationStream(ChatRequest request, String chatId) {
-        String msg = request.message() != null && !request.message().isBlank()
-                ? request.message()
-                : "基于以上对话内容，请生成最终的图片生成参数";
-
-        // RAG 三层增强：明确参考图 → RAG检索 → 风格模板
-        RagContext ragCtx = ragService.buildContext(request);
-        String ragDebugInfo = assembler.buildDebugInfo(ragCtx);
-        log.info("[RAG-Stream] 上下文构建完成 chatId={}:\n{}", chatId, ragDebugInfo);
-        String augmentedMsg = assembler.assemble(msg, ragCtx);
-        Object ragDebugData = assembler.buildDebugData(ragCtx, augmentedMsg);
+        RagPrepared rag = prepareRagContext(request, chatId, "RAG-Stream");
 
         Flux<StreamEventVO> generateEvent = Flux.defer(() -> {
             ImageAgentResponse aiResp = chatClient.prompt()
-                    .user(augmentedMsg)
+                    .user(rag.augmentedMsg)
                     .advisors(spec -> spec
-                            .param(MessageChatMemoryAdvisor.CHAT_MEMORY_CONVERSATION_ID_KEY, chatId)
-                            .param(MessageChatMemoryAdvisor.CHAT_MEMORY_RETRIEVE_SIZE_KEY, 50)
+                            .param(ChatMemory.CONVERSATION_ID, chatId)
+                            .param("chat_memory_retrieve_size", 50)
                             .param("chatId", chatId))
                     .call()
                     .entity(outputConverter);
-
-            // TODO: 如果 saveGeneratedToGallery=true，保存生成的图片到图库
-            if (Boolean.TRUE.equals(request.saveGeneratedToGallery())) {
-                log.info("[RAG-Stream] saveGeneratedToGallery=true chatId={}，待实现图库保存逻辑", chatId);
-            }
 
             return Flux.concat(
                     Flux.just(StreamEventVO.progress(chatId, "正在生成图片...")),
                     Flux.defer(() -> {
                         ImageGenerationResult genResult = imageGenerationService.generate(
                                 aiResp.imagePrompt(), aiResp.style(), aiResp.dimensions());
+                        if (Boolean.TRUE.equals(request.saveGeneratedToGallery())) {
+                            try {
+                                saveToGallery(aiResp, genResult, chatId);
+                            } catch (Exception e) {
+                                log.warn("[RAG-Stream] 保存到图库失败 chatId={}", chatId, e);
+                            }
+                        }
                         ChatResponseVO data = ChatResponseVO.imageGenerated(chatId,
                                 genResult.imageUrl(), genResult.imageBase64(), aiResp.message(),
                                 aiResp.imagePrompt(), aiResp.style(), aiResp.dimensions(), aiResp.revisedPrompt(),
-                                ragDebugData);
+                                rag.debugData);
                         return Flux.just(StreamEventVO.done(chatId, data));
                     })
             );
@@ -359,7 +364,7 @@ public class PictureApp {
                 spec.media(new Media(MimeTypeUtils.IMAGE_PNG, new ByteArrayResource(bytes)));
             } else if (imageUrl != null && !imageUrl.isBlank()) {
                 try {
-                    spec.media(new Media(MimeTypeUtils.IMAGE_PNG, new URL(imageUrl)));
+                    spec.media(new Media(MimeTypeUtils.IMAGE_PNG, new URL(imageUrl).toURI()));
                 } catch (Exception e) {
                     log.warn("[PictureApp] 无效图片URL: {}", imageUrl, e);
                 }
@@ -383,6 +388,33 @@ public class PictureApp {
         } catch (Exception e) {
             log.warn("[Stream] 无法解析LLM输出为ImageAgentResponse，回退为纯文本 chatId={}", chatId);
             return ChatResponseVO.textOnly(chatId, rawText);
+        }
+    }
+
+    private void saveToGallery(ImageAgentResponse aiResp, ImageGenerationResult genResult, String chatId) {
+        try {
+            String name = aiResp.imagePrompt() != null ? aiResp.imagePrompt() : "AI生成图片";
+            String introduction = aiResp.revisedPrompt();
+            String category = "ai-generated";
+            List<String> tags = aiResp.style() != null && !aiResp.style().isBlank()
+                    ? List.of(aiResp.style())
+                    : List.of();
+
+            if (genResult.imageBase64() != null && !genResult.imageBase64().isBlank()) {
+                GalleryUploadRequest uploadReq = new GalleryUploadRequest(
+                        genResult.imageBase64(), name, introduction, category, tags, null);
+                GalleryPicture saved = galleryService.upload(uploadReq);
+                log.info("[RAG] 生成图片已保存到图库 chatId={} pictureId={}", chatId, saved.id());
+            } else if (genResult.imageUrl() != null && !genResult.imageUrl().isBlank()) {
+                GalleryImportUrlRequest importReq = new GalleryImportUrlRequest(
+                        genResult.imageUrl(), name, introduction, category, tags);
+                GalleryPicture saved = galleryService.importUrl(importReq);
+                log.info("[RAG] 生成图片已通过URL导入图库 chatId={} pictureId={}", chatId, saved.id());
+            } else {
+                log.warn("[RAG] 生成的图片既无Base64也无URL，无法保存到图库 chatId={}", chatId);
+            }
+        } catch (Exception e) {
+            log.warn("[RAG] 保存生成图片到图库失败 chatId={}，继续主流程", chatId, e);
         }
     }
 }

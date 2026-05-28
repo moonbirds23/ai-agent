@@ -34,13 +34,14 @@ public class ZhipuImageGenerationService implements ImageGenerationService {
     private final ObjectMapper mapper;
 
     public ZhipuImageGenerationService(@Value("${zhipu.image.api-key:}") String apiKey,
-                                        RestTemplateBuilder builder) {
+                                        RestTemplateBuilder builder,
+                                        ObjectMapper mapper) {
         this.apiKey = apiKey;
         this.restTemplate = builder
                 .connectTimeout(Duration.ofSeconds(10))
                 .readTimeout(Duration.ofSeconds(120))
                 .build();
-        this.mapper = new ObjectMapper();
+        this.mapper = mapper;
     }
 
     @Override

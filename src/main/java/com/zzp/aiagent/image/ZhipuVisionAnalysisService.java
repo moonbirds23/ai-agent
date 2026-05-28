@@ -36,14 +36,15 @@ public class ZhipuVisionAnalysisService implements VisionAnalysisService {
                                       @Value("${zhipu.api-key:}") String apiKey,
                                       @Value("${zhipu.image.api-key:}") String imageApiKey,
                                       @Value("${zhipu.vision.model:glm-4.5v}") String model,
-                                      RestTemplateBuilder builder) {
+                                      RestTemplateBuilder builder,
+                                      ObjectMapper mapper) {
         this.apiKey = firstNonBlank(visionApiKey, apiKey, imageApiKey);
         this.model = model;
         this.restTemplate = builder
                 .connectTimeout(Duration.ofSeconds(10))
                 .readTimeout(Duration.ofSeconds(120))
                 .build();
-        this.mapper = new ObjectMapper();
+        this.mapper = mapper;
     }
 
     @Override
