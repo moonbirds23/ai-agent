@@ -36,6 +36,9 @@ app:
     min-score: 0.4
     max-context-chars: 2500
     retrieve-favorites-only: true
+  chat-memory:
+    max-messages: 50
+    ttl-days: 7
 
 zhipu:
   api-key: ${ZHIPU_API_KEY:}

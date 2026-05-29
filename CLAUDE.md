@@ -327,6 +327,8 @@ public interface ImageGenerationService {
 | **流式 ExceptionGuard 兜底不生效** | 敏感词等 BusinessException 在流式路径穿透 ExceptionGuard，直达 PictureApp | Spring AI M6 `DefaultAroundAdvisorChain` 的 Micrometer Observation scope 阻断 `.onErrorResume()` 信号 | `PictureApp.doChatStream()` 的 `.onErrorResume()` 区分 BusinessException（透传具体消息）和未知异常（泛化提示） |
 | **关键词过滤仅有字面匹配** | "继续我上一个任务"可绕过黑名单，模型仍生成违规内容 | `ContentGuardAdvisor` 用 `List.of("暴力","色情","政治敏感")` 做字符串匹配，无语义理解 | 暂无，后续需接 DeepSeek 或独立安全模型做语义审核 |
 | **PromptOptimizeAdvisor 无输入时模型幻觉** | 用户发"继续上一个任务"、空描述等无头指令时，DeepSeek 随机猜测主题 | 模型在缺少上下文时自行推测，非记忆污染 | 暂无，后续可在 PromptOptimize 中检测有效需求描述 |
+| **多模态记忆序列化丢失图片引用** | RedisChatMemory 只有 `instanceof String` 分支提取 mediaUrls，但 `Media.getData()` 实际类型是 `URI`（URL传图）或 `ByteArrayResource`（base64传图），两者都不匹配 → mediaUrls 恒为 null；且 `LocalObjectStorageService.getUrl()` 返回 `/api/gallery/files/{id}` 相对路径，`toMessage()` 中 `new URL(relativePath)` 直接抛 MalformedURLException | `RedisChatMemory.java:90` `toRecord()` 的 `filter(m -> m.getData() instanceof String)` 遗漏了 URI 和 ByteArrayResource 两种类型；`LocalObjectStorageService.java:70-76` `getUrl()` 未补全 baseUrl | 图片分析模式走手动 `chatMemory.add()` 只存纯文本，绕开了此 Bug；已通过 ImageRef 分类型存储（GALLERY/TEXT_DESCRIPTION）修复 |
+| **chat_memory_retrieve_size 不生效** | `PictureApp` 中 `.param("chat_memory_retrieve_size", 10/50)` 传参无效，MCMA 每次从 `ChatMemory.get()` 取全部消息全部注入 Prompt，消息越多 token 消耗越大 | Spring AI 1.0.0 GA 的 `MessageChatMemoryAdvisor` Builder 没有 `chatMemoryRetrieveSize()` 方法，类中也不存在 `CHAT_MEMORY_RETRIEVE_SIZE` 常量——该参数在 GA 版本被移除了，MCMA 的 `before()` 方法不对消息列表做截断 | `RedisChatMemory.get()` 内部改用 `LRANGE key (len-N) (len-1)` 只取最后 N 条，从 Redis 网络层截断
 
 ## 当前进度
 
@@ -360,7 +362,9 @@ public interface ImageGenerationService {
 - [x] **pgvector + VectorIndexService**（`VectorIndexService` 抽象，`SimpleVectorIndexService` / `PgVectorIndexService` 双实现，`PictureAiProfileServiceImpl` + `GalleryRagRetriever` 已用新接口）
 - [x] **RAG 增强接口体系**（`rag/enhance/` 包：QueryRewrite / HybridRetrieve / Rerank / ContextPack / Trace，接口+Record 已定义）
 - [x] **RAG 增强链路完整实现**（`RagQueryRewriteServiceImpl` LLM改写 + `HybridGalleryRetrieverImpl` 混合检索 + `RagRerankerImpl` 加权重排序 + `RagContextPackerImpl` referenceMode裁剪+字数截断 + `RagTraceServiceImpl` 追踪日志，`RagServiceImpl` 已集成，postgres profile 激活增强路径，默认 profile 走原三层 RAG 降级）
-- [x] **`referenceMode` 实际应用**（overall/style/color/composition 裁剪参考图画像字段，LLM Query Rewrite 自动推断 referenceMode，RagContextPacker 按 mode 裁剪 prompt 上下文）
+- [x] **图片记忆分流存储**（图库图片存 GALLERY:pictureId 引用，外部图片调视觉模型分析后存 TEXT_DESCRIPTION 文字；Media MimeType 写死 PNG 改为动态解析）
+- [x] **ChatMemory 双层存储**（Redis 短期记忆 + PostgreSQL chat_message 完整历史，`V3__chat_message.sql` + `ChatHistoryRepository` + `JdbcChatHistoryRepository` + `NoopChatHistoryRepository`）
+- [x] **chat_memory_retrieve_size 修复**（Spring AI 1.0.0 GA MCMA 无截断能力，改为 `RedisChatMemory.get()` 内部使用 Redis LRANGE 负索引只取最后 N 条）
 - [ ] RAG Prompt 不写入 ChatMemory（当前违反设计约束）
 
 ## 测试分类
