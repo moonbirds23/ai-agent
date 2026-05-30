@@ -1,0 +1,1 @@
+ALTER TABLE gallery_picture ADD COLUMN IF NOT EXISTS storage_location VARCHAR(16) NOT NULL DEFAULT 'MAIN';
