@@ -2,6 +2,7 @@ package com.zzp.aiagent.gallery;
 
 import com.zzp.aiagent.gallery.model.GalleryPicture;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -16,4 +17,7 @@ public interface GalleryPictureRepository {
     List<GalleryPicture> findAll();
 
     void deleteById(Long id);
+
+    /** 查询过期缓存图片：storage_location='CACHE' 且 create_time < cutoffTime */
+    List<GalleryPicture> findExpiredCache(LocalDateTime cutoffTime);
 }

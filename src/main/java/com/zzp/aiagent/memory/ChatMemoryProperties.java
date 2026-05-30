@@ -5,10 +5,12 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 @ConfigurationProperties("app.chat-memory")
 public record ChatMemoryProperties(
         int maxMessages,
-        int ttlDays
+        int ttlDays,
+        int maxConversationMessages
 ) {
     public ChatMemoryProperties {
         if (maxMessages <= 0) maxMessages = 50;
         if (ttlDays <= 0) ttlDays = 7;
+        if (maxConversationMessages <= 0) maxConversationMessages = 200;
     }
 }

@@ -130,6 +130,9 @@ public class RedisChatMemory implements ChatMemory {
         // 2. 同步写 Redis（必须成功）
         writeToRedis(key, records);
 
+        // 3. 截断 Redis List，只保留最近 maxMessages 条
+        redis.opsForList().trim(key, -maxMessages, -1);
+
         // 3. 异步写 PostgreSQL（失败不阻塞）
         CompletableFuture.runAsync(() -> {
             try {

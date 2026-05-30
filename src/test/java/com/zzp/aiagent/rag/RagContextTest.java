@@ -42,7 +42,7 @@ class RagContextTest {
                 1L, "http://example.com/pic1.jpg", null, "测试图片", "简介",
                 "插画", List.of("卡通", "可爱"), 1024L, 800, 600, 1.33, "png",
                 1L, 0L, 1, "#FFFFFF", "upload", false,
-                LocalDateTime.now(), LocalDateTime.now()
+                LocalDateTime.now(), LocalDateTime.now(), "MAIN"
         );
         sampleProfile = new PictureAiProfile(
                 1L, "测试主体", "测试场景", "卡通风格", "暖色调",
@@ -110,7 +110,7 @@ class RagContextTest {
             GalleryPicture pic2 = new GalleryPicture(
                     2L, "http://example.com/pic2.jpg", null, "图片2", null,
                     null, null, null, null, null, null, null,
-                    null, null, null, null, null, false, null, null
+                    null, null, null, null, null, false, null, null, "MAIN"
             );
             RagContext.ReferencePicture ref1 = new RagContext.ReferencePicture(samplePic, sampleProfile);
             RagContext.ReferencePicture ref2 = new RagContext.ReferencePicture(pic2, null);

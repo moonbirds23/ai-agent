@@ -10,11 +10,15 @@ import com.zzp.aiagent.common.ThrowUtils;
 import com.zzp.aiagent.exception.BusinessException;
 import com.zzp.aiagent.exception.ErrorCode;
 import com.zzp.aiagent.gallery.GalleryService;
+import com.zzp.aiagent.gallery.GalleryProperties;
 import com.zzp.aiagent.gallery.model.GalleryImportUrlRequest;
 import com.zzp.aiagent.gallery.model.GalleryPicture;
 import com.zzp.aiagent.gallery.model.GalleryUploadRequest;
+import com.zzp.aiagent.gallery.model.StorageLocation;
 import com.zzp.aiagent.image.ImageGenerationService;
 import com.zzp.aiagent.image.VisionAnalysisService;
+import com.zzp.aiagent.memory.ChatHistoryRepository;
+import com.zzp.aiagent.memory.ChatMemoryProperties;
 import com.zzp.aiagent.model.dto.chat.ChatRequest;
 import com.zzp.aiagent.rag.PromptReferenceAssembler;
 import com.zzp.aiagent.rag.RagService;
@@ -63,12 +67,16 @@ public class PictureApp {
     private final RagService ragService;
     private final PromptReferenceAssembler assembler;
     private final GalleryService galleryService;
+    private final ChatHistoryRepository chatHistoryRepo;
+    private final ChatMemoryProperties chatMemoryProps;
+    private final GalleryProperties galleryProps;
 
     public PictureApp(ChatModel openAiChatModel, ChatMemory chatMemory, PromptTemplate promptTemplate,
                       ObjectMapper objectMapper, ImageGenerationService imageGenerationService,
                       VisionAnalysisService visionAnalysisService,
                       RagService ragService, PromptReferenceAssembler assembler,
-                      GalleryService galleryService) {
+                      GalleryService galleryService, ChatHistoryRepository chatHistoryRepo,
+                      ChatMemoryProperties chatMemoryProps, GalleryProperties galleryProps) {
         this.chatMemory = chatMemory;
         this.outputConverter = new BeanOutputConverter<>(ImageAgentResponse.class);
         this.objectMapper = objectMapper;
@@ -77,6 +85,9 @@ public class PictureApp {
         this.ragService = ragService;
         this.assembler = assembler;
         this.galleryService = galleryService;
+        this.chatHistoryRepo = chatHistoryRepo;
+        this.chatMemoryProps = chatMemoryProps;
+        this.galleryProps = galleryProps;
         String systemPrompt = promptTemplate.render("default", "system",
                 "outputFormat", outputConverter.getFormat());
         this.chatClient = ChatClient.builder(openAiChatModel)
@@ -94,6 +105,7 @@ public class PictureApp {
     // ── 非流式入口 ─────────────────────────────────────────────────
 
     public ChatResponseVO doChat(ChatRequest request, String chatId) {
+        checkConversationLimit(chatId);
         return switch (resolveMode(request)) {
             case ChatRequest.MODE_IMAGE_ANALYSIS -> handleImageAnalysis(request, chatId);
             case ChatRequest.MODE_IMAGE_GENERATION -> handleGeneration(request, chatId);
@@ -105,8 +117,9 @@ public class PictureApp {
     // ── 讨论模式 ──────────────────────────────────────────────────
 
     private ChatResponseVO handleDiscussion(ChatRequest request, String chatId) {
+        GalleryPicture saved = autoSaveToCacheGallery(request);
         ImageAgentResponse aiResp = chatClient.prompt()
-                .user(buildUserSpec(request))
+                .user(buildUserSpec(request, saved))
                 .advisors(spec -> spec
                         .param(ChatMemory.CONVERSATION_ID, chatId)
                         .param("chat_memory_retrieve_size", 10)
@@ -120,6 +133,7 @@ public class PictureApp {
 
     private ChatResponseVO handleImageAnalysis(ChatRequest request, String chatId) {
         validateImageAnalysisRequest(request);
+        autoSaveToCacheGallery(request); // 自动入库
         VisionAnalysisResult result = visionAnalysisService.analyze(
                 request.message(), request.imageBase64(), request.imageUrl());
         ChatResponseVO data = ChatResponseVO.imageAnalyzed(chatId, result);
@@ -144,10 +158,11 @@ public class PictureApp {
     // ── 生成模式 ──────────────────────────────────────────────────
 
     private ChatResponseVO handleGeneration(ChatRequest request, String chatId) {
+        GalleryPicture saved = autoSaveToCacheGallery(request);
         RagPrepared rag = prepareRagContext(request, chatId, "RAG");
 
         ImageAgentResponse aiResp = chatClient.prompt()
-                .user(rag.augmentedMsg)
+                .user(spec -> buildGenerationUserSpec(spec, rag.augmentedMsg, saved))
                 .advisors(spec -> spec
                         .param(ChatMemory.CONVERSATION_ID, chatId)
                         .param("chat_memory_retrieve_size", 50)
@@ -170,6 +185,7 @@ public class PictureApp {
     // ── 流式入口 ──────────────────────────────────────────────────
 
     public Flux<StreamEventVO> doChatStream(ChatRequest request, String chatId) {
+        checkConversationLimit(chatId);
         return switch (resolveMode(request)) {
             case ChatRequest.MODE_IMAGE_ANALYSIS -> handleImageAnalysisStream(request, chatId);
             case ChatRequest.MODE_IMAGE_GENERATION -> handleGenerationStream(request, chatId);
@@ -181,10 +197,11 @@ public class PictureApp {
     // ── 流式讨论模式 ──────────────────────────────────────────────
 
     private Flux<StreamEventVO> handleDiscussionStream(ChatRequest request, String chatId) {
+        GalleryPicture saved = autoSaveToCacheGallery(request);
         StringBuilder accumulator = new StringBuilder();
 
         Flux<StreamEventVO> tokenFlux = chatClient.prompt()
-                .user(buildUserSpec(request))
+                .user(buildUserSpec(request, saved))
                 .advisors(spec -> spec
                         .param(ChatMemory.CONVERSATION_ID, chatId)
                         .param("chat_memory_retrieve_size", 10)
@@ -222,6 +239,7 @@ public class PictureApp {
     private Flux<StreamEventVO> handleImageAnalysisStream(ChatRequest request, String chatId) {
         Flux<StreamEventVO> doneEvent = Flux.defer(() -> {
             validateImageAnalysisRequest(request);
+            autoSaveToCacheGallery(request); // 自动入库
             VisionAnalysisResult result = visionAnalysisService.analyze(
                     request.message(), request.imageBase64(), request.imageUrl());
             ChatResponseVO data = ChatResponseVO.imageAnalyzed(chatId, result);
@@ -250,11 +268,12 @@ public class PictureApp {
     // ── 流式生成模式 ──────────────────────────────────────────────
 
     private Flux<StreamEventVO> handleGenerationStream(ChatRequest request, String chatId) {
+        GalleryPicture saved = autoSaveToCacheGallery(request);
         RagPrepared rag = prepareRagContext(request, chatId, "RAG-Stream");
 
         Flux<StreamEventVO> generateEvent = Flux.defer(() -> {
             ImageAgentResponse aiResp = chatClient.prompt()
-                    .user(rag.augmentedMsg)
+                    .user(spec -> buildGenerationUserSpec(spec, rag.augmentedMsg, saved))
                     .advisors(spec -> spec
                             .param(ChatMemory.CONVERSATION_ID, chatId)
                             .param("chat_memory_retrieve_size", 50)
@@ -354,9 +373,21 @@ public class PictureApp {
         ));
     }
 
-    private Consumer<ChatClient.PromptUserSpec> buildUserSpec(ChatRequest request) {
+    private Consumer<ChatClient.PromptUserSpec> buildUserSpec(ChatRequest request, GalleryPicture savedPicture) {
         return spec -> {
             spec.text(request.message());
+            // 已入库 → 用图库 URL（ChatMemory 可识别为 GALLERY）
+            if (savedPicture != null && savedPicture.url() != null) {
+                try {
+                    String mime = mimeTypeFromFormat(savedPicture.picFormat());
+                    spec.media(new Media(MimeTypeUtils.parseMimeType(mime),
+                            new URL(savedPicture.url()).toURI()));
+                    return;
+                } catch (Exception e) {
+                    log.warn("[PictureApp] 图库URL构造失败，降级发送: {}", e.getMessage());
+                }
+            }
+            // 未入库 → 直接发送 base64 bytes
             String imageBase64 = request.imageBase64();
             String imageUrl = request.imageUrl();
             if (imageBase64 != null && !imageBase64.isBlank()) {
@@ -369,6 +400,30 @@ public class PictureApp {
                     log.warn("[PictureApp] 无效图片URL: {}", imageUrl, e);
                 }
             }
+        };
+    }
+
+    private void buildGenerationUserSpec(ChatClient.PromptUserSpec spec, String augmentedMsg, GalleryPicture savedPicture) {
+        spec.text(augmentedMsg);
+        if (savedPicture != null && savedPicture.url() != null) {
+            try {
+                String mime = mimeTypeFromFormat(savedPicture.picFormat());
+                spec.media(new Media(MimeTypeUtils.parseMimeType(mime),
+                        new URL(savedPicture.url()).toURI()));
+            } catch (Exception e) {
+                log.warn("[PictureApp] 生成模式：图库URL构造失败: {}", e.getMessage());
+            }
+        }
+    }
+
+    private static String mimeTypeFromFormat(String picFormat) {
+        if (picFormat == null) return "image/png";
+        return switch (picFormat.toLowerCase()) {
+            case "jpg", "jpeg" -> "image/jpeg";
+            case "webp" -> "image/webp";
+            case "gif" -> "image/gif";
+            case "bmp" -> "image/bmp";
+            default -> "image/png";
         };
     }
 
@@ -391,6 +446,35 @@ public class PictureApp {
         }
     }
 
+    private void checkConversationLimit(String chatId) {
+        int count = chatHistoryRepo.countByConversation(chatId);
+        ThrowUtils.throwIf(count >= chatMemoryProps.maxConversationMessages(),
+                ErrorCode.PARAMS_ERROR,
+                "会话消息已达上限(" + count + "/" + chatMemoryProps.maxConversationMessages() + ")，请开启新会话");
+    }
+
+    private GalleryPicture autoSaveToCacheGallery(ChatRequest request) {
+        if (!hasImage(request)) return null;
+        try {
+            String imageBase64 = request.imageBase64();
+            if (imageBase64 != null && !imageBase64.isBlank()) {
+                GalleryUploadRequest uploadReq = new GalleryUploadRequest(
+                        imageBase64,
+                        "chat-image-" + System.currentTimeMillis(),
+                        null, null, null, null,
+                        StorageLocation.CACHE
+                );
+                GalleryPicture saved = galleryService.upload(uploadReq);
+                log.info("[PictureApp] 图片自动存入缓存图库 pictureId={} name={}", saved.id(), saved.name());
+                return saved;
+            }
+            // URL 类型图片暂不做自动入库（需下载后再上传）
+        } catch (Exception e) {
+            log.warn("[PictureApp] 自动入库失败，降级为直接发送: {}", e.getMessage());
+        }
+        return null;
+    }
+
     private void saveToGallery(ImageAgentResponse aiResp, ImageGenerationResult genResult, String chatId) {
         try {
             String name = aiResp.imagePrompt() != null ? aiResp.imagePrompt() : "AI生成图片";
@@ -402,7 +486,8 @@ public class PictureApp {
 
             if (genResult.imageBase64() != null && !genResult.imageBase64().isBlank()) {
                 GalleryUploadRequest uploadReq = new GalleryUploadRequest(
-                        genResult.imageBase64(), name, introduction, category, tags, null);
+                        genResult.imageBase64(), name, introduction, category, tags, null,
+                        StorageLocation.MAIN);
                 GalleryPicture saved = galleryService.upload(uploadReq);
                 log.info("[RAG] 生成图片已保存到图库 chatId={} pictureId={}", chatId, saved.id());
             } else if (genResult.imageUrl() != null && !genResult.imageUrl().isBlank()) {

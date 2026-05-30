@@ -7,6 +7,7 @@ import com.zzp.aiagent.gallery.model.GalleryImportUrlRequest;
 import com.zzp.aiagent.gallery.model.GalleryPicture;
 import com.zzp.aiagent.gallery.model.GalleryQueryRequest;
 import com.zzp.aiagent.gallery.model.GalleryUploadRequest;
+import com.zzp.aiagent.gallery.model.StorageLocation;
 import com.zzp.aiagent.image.ImageDownloadService;
 import com.zzp.aiagent.model.dto.image.DownloadedImage;
 import com.zzp.aiagent.profile.PictureAiProfileService;
@@ -62,6 +63,8 @@ public class GalleryServiceImpl implements GalleryService {
         ImageMeta meta = readImageMeta(decoded.bytes(), decoded.contentType());
         String ext = extFromContentType(decoded.contentType());
 
+        String storageLocation = request.storageLocation() != null
+                ? request.storageLocation() : StorageLocation.MAIN;
         GalleryPicture picture = new GalleryPicture(
                 null,                          // id -> assigned by repository
                 null,                          // url -> set after saving
@@ -82,7 +85,8 @@ public class GalleryServiceImpl implements GalleryService {
                 "upload",                      // sourceType
                 request.favorited() != null ? request.favorited() : false,
                 LocalDateTime.now(),
-                LocalDateTime.now()
+                LocalDateTime.now(),
+                storageLocation
         );
 
         GalleryPicture saved = repository.save(picture);
@@ -100,7 +104,8 @@ public class GalleryServiceImpl implements GalleryService {
                 saved.picScale(), saved.picFormat(), saved.userId(),
                 saved.spaceId(), saved.reviewStatus(), saved.picColor(),
                 saved.sourceType(), saved.favorited(),
-                saved.createTime(), saved.updateTime()
+                saved.createTime(), saved.updateTime(),
+                saved.storageLocation()
         );
         repository.save(withUrl);
 
@@ -142,7 +147,8 @@ public class GalleryServiceImpl implements GalleryService {
                 "import_url",
                 false,
                 LocalDateTime.now(),
-                LocalDateTime.now()
+                LocalDateTime.now(),
+                StorageLocation.MAIN
         );
 
         GalleryPicture saved = repository.save(picture);
@@ -158,7 +164,8 @@ public class GalleryServiceImpl implements GalleryService {
                 saved.picScale(), saved.picFormat(), saved.userId(),
                 saved.spaceId(), saved.reviewStatus(), saved.picColor(),
                 saved.sourceType(), saved.favorited(),
-                saved.createTime(), saved.updateTime()
+                saved.createTime(), saved.updateTime(),
+                saved.storageLocation()
         );
         repository.save(withUrl);
 
@@ -236,7 +243,8 @@ public class GalleryServiceImpl implements GalleryService {
                 existing.picScale(), existing.picFormat(), existing.userId(),
                 existing.spaceId(), existing.reviewStatus(), existing.picColor(),
                 existing.sourceType(), favorited,
-                existing.createTime(), LocalDateTime.now()
+                existing.createTime(), LocalDateTime.now(),
+                existing.storageLocation()
         );
         return repository.save(updated);
     }

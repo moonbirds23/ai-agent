@@ -86,7 +86,7 @@ class RagServiceImplTest {
         return new GalleryPicture(
                 id, "http://example.com/pic" + id + ".jpg", null, name, null,
                 null, null, null, null, null, null, null,
-                null, null, null, null, null, false, null, null
+                null, null, null, null, null, false, null, null, "MAIN"
         );
     }
 

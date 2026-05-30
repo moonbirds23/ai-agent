@@ -95,10 +95,15 @@ com.zzp.aiagent
   ├── app/              应用层（PictureApp，RAG 增强生图链路）
   ├── advisor/          Advisor 拦截链
   ├── memory/           会话记忆（RedisChatMemory，含 media 序列化）
-  ├── gallery/          图库管理（单用户模式，JSON 文件存储）
-  │     ├── model/GalleryPicture.java     图片元数据 record
+  ├── gallery/          图库管理（单用户模式，JSON/PG 双存储）
+  │     ├── model/GalleryPicture.java     图片元数据 record (23字段)
+  │     ├── model/StorageLocation.java    存储位置常量 MAIN/CACHE
+  │     ├── model/GalleryUploadRequest.java
   │     ├── GalleryService.java          上传/导入/分页/收藏/删除
-  │     └── JsonFileGalleryPictureRepository.java  → gallery-data/pictures.json
+  │     ├── GalleryProperties.java        @ConfigurationProperties("app.gallery")
+  │     ├── GalleryCacheCleanupTask.java  @Scheduled 缓存图库定时清理
+  │     ├── PostgresGalleryPictureRepository.java  @Profile("postgres") + @Primary
+  │     └── JsonFileGalleryPictureRepository.java  @Profile("!test & !postgres")
   ├── profile/          图片 AI 画像
   │     ├── model/PictureAiProfile.java  视觉分析结果 + indexText + vectorStatus
   │     └── PictureAiProfileService.java 分析/索引/删除
@@ -271,6 +276,8 @@ Advisor 内抛 `BusinessException` → `ExceptionGuardAdvisor`（order=MAX）兜
 | **智谱 embedding-2 相似度偏低** | 语义相关内容余弦相似度通常 0.4~0.5，`GalleryRagRetriever.MIN_SCORE` 设 0.4 较为合理，0.65 过严会导致大量漏召回 |
 | **RAG Prompt 写入 ChatMemory** | 当前 RAG 增强后的完整 Prompt 通过 `chatClient.prompt().user()` 传入，会被 `MessageChatMemoryAdvisor` 自动存入记忆。方案设计要求"RAG 上下文只作为本次调用临时 Prompt，不写入 ChatMemory"，当前违反此约束 |
 | **RAG 增强链 Profile 策略** | 5 个 enhance 实现类中，`HybridGalleryRetrieverImpl` 是 `@Profile("postgres")`（依赖 pgvector），其余 4 个是 `@Profile("!test")`。`RagServiceImpl` 通过 `ObjectProvider<T>` 注入所有增强组件，检测到全部就绪时走增强路径，否则走原三层 RAG 降级。测试中需 mock 5 个 ObjectProvider 并设 `@MockitoSettings(strictness = Strictness.LENIENT)` 避免 UnnecessaryStubbing |
+| **GalleryPicture 23 字段 record** | 加字段影响 N 处 `new GalleryPicture(...)` 构造点（Service/Repository/测试）。record 有 compact constructor：`if (storageLocation == null) storageLocation = StorageLocation.MAIN`，旧 JSON 数据无此字段反序列化为 null 后自动兜底 |
+| **@EnableScheduling 已启用** | `AiAgentApplication` 已加 `@EnableScheduling`，`GalleryCacheCleanupTask` 通过 `@Scheduled(cron)` 每日清理过期缓存图。test profile 通过 `@Profile("!test")` 排除定时任务，无需额外配置 |
 
 ## 多模态架构
 
@@ -365,7 +372,12 @@ public interface ImageGenerationService {
 - [x] **图片记忆分流存储**（图库图片存 GALLERY:pictureId 引用，外部图片调视觉模型分析后存 TEXT_DESCRIPTION 文字；Media MimeType 写死 PNG 改为动态解析）
 - [x] **ChatMemory 双层存储**（Redis 短期记忆 + PostgreSQL chat_message 完整历史，`V3__chat_message.sql` + `ChatHistoryRepository` + `JdbcChatHistoryRepository` + `NoopChatHistoryRepository`）
 - [x] **chat_memory_retrieve_size 修复**（Spring AI 1.0.0 GA MCMA 无截断能力，改为 `RedisChatMemory.get()` 内部使用 Redis LRANGE 负索引只取最后 N 条）
-- [ ] RAG Prompt 不写入 ChatMemory（当前违反设计约束）
+- [x] **参考图数量限制 ≤ 3**（`ChatRequest.referencePictureIds` 加 `@Size(max=3)`，Jakarta 校验在 Controller 层拦截）
+- [x] **图库存储位置 + 缓存图库**（`StorageLocation` 常量类 MAIN/CACHE，`GalleryPicture.storageLocation` 字段，`GalleryProperties` 配置，`GalleryCacheCleanupTask` 定时清理过期缓存图，V4 Flyway 迁移）
+- [x] **对话图片自动入库**（`PictureApp.autoSaveToCacheGallery()` → 图片自动以 CACHE 位置入库，`buildUserSpec()` 用入库 URL 构造 Media（ChatMemory 可识别为 GALLERY），入库失败降级为直发 bytes）
+- [x] **生成模式当前图片补发**（`handleGeneration/handleGenerationStream` 原本丢弃当前图片，现通过 `buildGenerationUserSpec()` 将入库后的原图 Media 挂到生成 Prompt 上）
+- [x] **会话窗口消息数限制**（`ChatMemoryProperties.maxConversationMessages` 默认 200，`PictureApp` 入口调用 `ChatHistoryRepository.countByConversation()` 校验，超限抛 BusinessException）
+- [x] **Redis List trim 截断**（`RedisChatMemory.add()` 末尾 `trim(key, -maxMessages, -1)` 确保列表不无限增长）
 
 ## 测试分类
 

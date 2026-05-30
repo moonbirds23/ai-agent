@@ -3,7 +3,10 @@ package com.zzp.aiagent.app;
 import com.zzp.aiagent.common.PromptTemplate;
 import com.zzp.aiagent.image.ImageGenerationService;
 import com.zzp.aiagent.image.VisionAnalysisService;
+import com.zzp.aiagent.gallery.GalleryProperties;
 import com.zzp.aiagent.gallery.GalleryService;
+import com.zzp.aiagent.memory.ChatHistoryRepository;
+import com.zzp.aiagent.memory.ChatMemoryProperties;
 import com.zzp.aiagent.rag.PromptReferenceAssembler;
 import com.zzp.aiagent.rag.RagService;
 import com.zzp.aiagent.model.dto.chat.ChatRequest;
@@ -54,13 +57,16 @@ class PictureAppMultiTurnTest {
         PromptReferenceAssembler assembler = mock(PromptReferenceAssembler.class);
         when(assembler.assemble(any(), any())).thenAnswer(inv -> inv.getArgument(0));
         GalleryService galleryService = mock(GalleryService.class);
+        ChatHistoryRepository chatHistoryRepo = mock(ChatHistoryRepository.class);
+        ChatMemoryProperties chatMemoryProps = new ChatMemoryProperties(50, 7, 200);
+        GalleryProperties galleryProps = new GalleryProperties(7, "0 0 3 * * ?");
         pictureApp = new PictureApp(chatModel, MessageWindowChatMemory.builder()
                 .chatMemoryRepository(new InMemoryChatMemoryRepository())
                 .maxMessages(100)
                 .build(), new PromptTemplate(),
                 new com.fasterxml.jackson.databind.ObjectMapper(),
                 mock(ImageGenerationService.class), mock(VisionAnalysisService.class), ragService, assembler,
-                galleryService);
+                galleryService, chatHistoryRepo, chatMemoryProps, galleryProps);
     }
 
     private static ChatRequest req(String message) {

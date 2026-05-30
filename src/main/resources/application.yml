@@ -39,6 +39,10 @@ app:
   chat-memory:
     max-messages: 50
     ttl-days: 7
+    max-conversation-messages: 200
+  gallery:
+    cache-max-age-days: 7
+    cache-cleanup-cron: "0 0 3 * * ?"
 
 zhipu:
   api-key: ${ZHIPU_API_KEY:}

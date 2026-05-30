@@ -23,5 +23,10 @@ public record GalleryPicture(
         String sourceType,
         Boolean favorited,
         LocalDateTime createTime,
-        LocalDateTime updateTime
-) {}
+        LocalDateTime updateTime,
+        String storageLocation
+) {
+    public GalleryPicture {
+        if (storageLocation == null) storageLocation = StorageLocation.MAIN;
+    }
+}

@@ -44,7 +44,7 @@ class PromptReferenceAssemblerTest {
                 1L, "http://example.com/pic1.jpg", null, "BIGBANG Q版合影", "团体合影",
                 "插画", List.of("卡通", "Q版", "偶像"), 1024L, 800, 600, 1.33, "png",
                 1L, 0L, 1, "#FFFFFF", "upload", true,
-                LocalDateTime.now(), LocalDateTime.now()
+                LocalDateTime.now(), LocalDateTime.now(), "MAIN"
         );
 
         sampleProfile = new PictureAiProfile(
@@ -252,7 +252,7 @@ class PromptReferenceAssemblerTest {
             GalleryPicture noName = new GalleryPicture(
                     99L, null, null, null, null, null, null, null,
                     null, null, null, null, null, null, null, null,
-                    null, false, null, null
+                    null, false, null, null, "MAIN"
             );
             RagContext ctx = RagContext.empty()
                     .addExplicit(new RagContext.ReferencePicture(noName, null));

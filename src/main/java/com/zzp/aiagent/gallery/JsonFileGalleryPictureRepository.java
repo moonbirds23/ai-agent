@@ -3,6 +3,7 @@ package com.zzp.aiagent.gallery;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.zzp.aiagent.gallery.model.GalleryPicture;
+import com.zzp.aiagent.gallery.model.StorageLocation;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Profile;
@@ -12,6 +13,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -128,6 +130,19 @@ public class JsonFileGalleryPictureRepository implements GalleryPictureRepositor
         }
     }
 
+    @Override
+    public List<GalleryPicture> findExpiredCache(LocalDateTime cutoffTime) {
+        lock.lock();
+        try {
+            return pictures.stream()
+                    .filter(p -> StorageLocation.CACHE.equals(p.storageLocation()))
+                    .filter(p -> p.createTime() != null && p.createTime().isBefore(cutoffTime))
+                    .toList();
+        } finally {
+            lock.unlock();
+        }
+    }
+
     private int indexOf(Long id) {
         for (int i = 0; i < pictures.size(); i++) {
             if (id.equals(pictures.get(i).id())) {
@@ -156,7 +171,8 @@ public class JsonFileGalleryPictureRepository implements GalleryPictureRepositor
                 picture.picScale(), picture.picFormat(), picture.userId(),
                 picture.spaceId(), picture.reviewStatus(), picture.picColor(),
                 picture.sourceType(), picture.favorited(),
-                picture.createTime(), picture.updateTime()
+                picture.createTime(), picture.updateTime(),
+                picture.storageLocation()
         );
     }
 

@@ -44,7 +44,7 @@ class RedisChatMemoryTest {
         when(redis.expire(anyString(), any(Duration.class))).thenReturn(true);
 
         historyRepo = mock(ChatHistoryRepository.class);
-        props = new ChatMemoryProperties(50, 7);
+        props = new ChatMemoryProperties(50, 7, 200);
 
         // ObjectProvider 默认返回 null（模拟无 Gallery/Vision/Storage 服务）
         ObjectProvider galleryProvider = mock(ObjectProvider.class);
@@ -253,7 +253,7 @@ class RedisChatMemoryTest {
         var galleryService = mock(com.zzp.aiagent.gallery.GalleryService.class);
         when(galleryService.getById(42L)).thenReturn(new com.zzp.aiagent.gallery.model.GalleryPicture(
                 42L, "/api/gallery/files/42", null, "测试图", null, null, null, null, null, null,
-                null, null, 1L, 0L, 1, null, "upload", false, null, null));
+                null, null, 1L, 0L, 1, null, "upload", false, null, null, "MAIN"));
 
         ObjectProvider galleryProvider = mock(ObjectProvider.class);
         when(galleryProvider.getIfAvailable()).thenReturn(galleryService);
@@ -374,7 +374,7 @@ class RedisChatMemoryTest {
     @Test
     @DisplayName("maxMessages=10 → get 最多取 10 条")
     void customMaxMessages_limitsGet() {
-        var customProps = new ChatMemoryProperties(10, 7);
+        var customProps = new ChatMemoryProperties(10, 7, 200);
         ObjectProvider galleryProvider = mock(ObjectProvider.class);
         when(galleryProvider.getIfAvailable()).thenReturn(null);
         ObjectProvider visionProvider = mock(ObjectProvider.class);
@@ -423,16 +423,18 @@ class RedisChatMemoryTest {
     @Test
     @DisplayName("ChatMemoryProperties 默认值：maxMessages=50, ttlDays=7")
     void properties_defaults() {
-        var p = new ChatMemoryProperties(0, 0);
+        var p = new ChatMemoryProperties(0, 0, 0);
         assertThat(p.maxMessages()).isEqualTo(50);
         assertThat(p.ttlDays()).isEqualTo(7);
+        assertThat(p.maxConversationMessages()).isEqualTo(200);
     }
 
     @Test
     @DisplayName("ChatMemoryProperties 负值 → 兜底为默认值")
     void properties_negative_fallsBack() {
-        var p = new ChatMemoryProperties(-1, -1);
+        var p = new ChatMemoryProperties(-1, -1, -1);
         assertThat(p.maxMessages()).isEqualTo(50);
         assertThat(p.ttlDays()).isEqualTo(7);
+        assertThat(p.maxConversationMessages()).isEqualTo(200);
     }
 }

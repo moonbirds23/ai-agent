@@ -8,5 +8,6 @@ public record GalleryUploadRequest(
         String introduction,
         String category,
         List<String> tags,
-        Boolean favorited
+        Boolean favorited,
+        String storageLocation
 ) {}

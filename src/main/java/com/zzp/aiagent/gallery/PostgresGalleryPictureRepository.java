@@ -3,6 +3,7 @@ package com.zzp.aiagent.gallery;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zzp.aiagent.gallery.model.GalleryPicture;
+import com.zzp.aiagent.gallery.model.StorageLocation;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Primary;
 import org.springframework.context.annotation.Profile;
@@ -14,6 +15,7 @@ import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.stereotype.Repository;
 
 import java.sql.Timestamp;
+import java.time.LocalDateTime;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
@@ -61,7 +63,8 @@ public class PostgresGalleryPictureRepository implements GalleryPictureRepositor
                 rs.getString("source_type"),
                 rs.getBoolean("favorited"),
                 rs.getTimestamp("create_time") != null ? rs.getTimestamp("create_time").toLocalDateTime() : null,
-                rs.getTimestamp("update_time") != null ? rs.getTimestamp("update_time").toLocalDateTime() : null
+                rs.getTimestamp("update_time") != null ? rs.getTimestamp("update_time").toLocalDateTime() : null,
+                rs.getString("storage_location")
         );
     };
 
@@ -73,10 +76,12 @@ public class PostgresGalleryPictureRepository implements GalleryPictureRepositor
         String sql = """
                 INSERT INTO gallery_picture (url, thumbnail_url,
                     name, introduction, category, tags, pic_size, pic_width, pic_height, pic_scale,
-                    pic_format, user_id, space_id, review_status, pic_color, source_type, favorited)
+                    pic_format, user_id, space_id, review_status, pic_color, source_type, favorited,
+                    storage_location)
                 VALUES (:url, :thumbnailUrl,
                     :name, :introduction, :category, :tags::jsonb, :picSize, :picWidth, :picHeight, :picScale,
-                    :picFormat, :userId, :spaceId, :reviewStatus, :picColor, :sourceType, :favorited)
+                    :picFormat, :userId, :spaceId, :reviewStatus, :picColor, :sourceType, :favorited,
+                    :storageLocation)
                 """;
         String tagsJson = null;
         try {
@@ -99,7 +104,7 @@ public class PostgresGalleryPictureRepository implements GalleryPictureRepositor
                     category=:category, tags=:tags::jsonb, pic_size=:picSize, pic_width=:picWidth,
                     pic_height=:picHeight, pic_scale=:picScale, pic_format=:picFormat,
                     pic_color=:picColor, source_type=:sourceType, favorited=:favorited,
-                    update_time=now()
+                    storage_location=:storageLocation, update_time=now()
                 WHERE id=:id AND is_delete=0
                 """;
         String tagsJson = null;
@@ -146,6 +151,19 @@ public class PostgresGalleryPictureRepository implements GalleryPictureRepositor
         log.debug("[PostgresRepo] 软删除图片 id={}", id);
     }
 
+    @Override
+    public List<GalleryPicture> findExpiredCache(LocalDateTime cutoffTime) {
+        String sql = """
+                SELECT * FROM gallery_picture
+                WHERE storage_location = 'CACHE' AND is_delete = 0
+                AND create_time < :cutoffTime
+                ORDER BY create_time ASC
+                """;
+        return jdbc.query(sql,
+                new MapSqlParameterSource("cutoffTime", Timestamp.valueOf(cutoffTime)),
+                ROW_MAPPER);
+    }
+
     private MapSqlParameterSource baseParams(GalleryPicture p) {
         return new MapSqlParameterSource()
                 .addValue("id", p.id())
@@ -164,6 +182,7 @@ public class PostgresGalleryPictureRepository implements GalleryPictureRepositor
                 .addValue("reviewStatus", p.reviewStatus())
                 .addValue("picColor", p.picColor())
                 .addValue("sourceType", p.sourceType())
-                .addValue("favorited", p.favorited());
+                .addValue("favorited", p.favorited())
+                .addValue("storageLocation", p.storageLocation());
     }
 }

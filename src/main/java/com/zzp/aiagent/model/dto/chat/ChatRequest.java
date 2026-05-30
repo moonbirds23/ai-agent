@@ -1,6 +1,7 @@
 package com.zzp.aiagent.model.dto.chat;
 
 import io.swagger.v3.oas.annotations.media.Schema;
+import jakarta.validation.constraints.Size;
 
 import java.util.List;
 
@@ -24,7 +25,8 @@ public record ChatRequest(
         @Schema(description = "显式模式: chat=文本交流, image_analysis=图片分析, image_generation=图片生成", example = "chat")
         String mode,
 
-        @Schema(description = "明确参考图ID列表")
+        @Schema(description = "明确参考图ID列表，最多 3 张")
+        @Size(max = 3, message = "参考图不超过 3 张")
         List<Long> referencePictureIds,
 
         @Schema(description = "启用/禁用图库RAG检索，默认true", example = "true")

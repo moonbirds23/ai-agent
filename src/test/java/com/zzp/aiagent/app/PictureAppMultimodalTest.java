@@ -5,7 +5,10 @@ import com.zzp.aiagent.exception.BusinessException;
 import com.zzp.aiagent.exception.ErrorCode;
 import com.zzp.aiagent.image.ImageGenerationService;
 import com.zzp.aiagent.image.VisionAnalysisService;
+import com.zzp.aiagent.gallery.GalleryProperties;
 import com.zzp.aiagent.gallery.GalleryService;
+import com.zzp.aiagent.memory.ChatHistoryRepository;
+import com.zzp.aiagent.memory.ChatMemoryProperties;
 import com.zzp.aiagent.rag.PromptReferenceAssembler;
 import com.zzp.aiagent.rag.RagService;
 import com.zzp.aiagent.model.dto.chat.ChatRequest;
@@ -57,6 +60,9 @@ class PictureAppMultimodalTest {
     private RagService ragService;
     private PromptReferenceAssembler assembler;
     private GalleryService galleryService;
+    private ChatHistoryRepository chatHistoryRepo;
+    private ChatMemoryProperties chatMemoryProps;
+    private GalleryProperties galleryProps;
     private PictureApp pictureApp;
 
     @BeforeEach
@@ -67,6 +73,9 @@ class PictureAppMultimodalTest {
         ragService = mock(RagService.class);
         assembler = mock(PromptReferenceAssembler.class);
         galleryService = mock(GalleryService.class);
+        chatHistoryRepo = mock(ChatHistoryRepository.class);
+        chatMemoryProps = new ChatMemoryProperties(50, 7, 200);
+        galleryProps = new GalleryProperties(7, "0 0 3 * * ?");
         when(ragService.buildContext(any())).thenReturn(com.zzp.aiagent.rag.model.RagContext.empty());
         when(assembler.assemble(any(), any())).thenAnswer(inv -> inv.getArgument(0));
         pictureApp = new PictureApp(chatModel, MessageWindowChatMemory.builder()
@@ -74,7 +83,8 @@ class PictureAppMultimodalTest {
                 .maxMessages(100)
                 .build(), new PromptTemplate(),
                 new com.fasterxml.jackson.databind.ObjectMapper(),
-                imageGenService, visionAnalysisService, ragService, assembler, galleryService);
+                imageGenService, visionAnalysisService, ragService, assembler, galleryService,
+                chatHistoryRepo, chatMemoryProps, galleryProps);
     }
 
     private static String jsonChat(String message) {

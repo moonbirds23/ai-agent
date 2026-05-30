@@ -51,7 +51,7 @@ class ExplicitReferenceResolverTest {
                 id, "http://example.com/pic" + id + ".jpg", null, name, "简介",
                 "插画", List.of("卡通"), 1024L, 800, 600, 1.33, "png",
                 1L, 0L, 1, "#FFF", "upload", false,
-                LocalDateTime.now(), LocalDateTime.now()
+                LocalDateTime.now(), LocalDateTime.now(), "MAIN"
         );
     }
 
