@@ -1,0 +1,1 @@
+ALTER TABLE gallery_picture ADD COLUMN IF NOT EXISTS pic_hash VARCHAR(64);

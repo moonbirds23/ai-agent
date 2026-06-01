@@ -8,5 +8,8 @@ public record RagProperties(
     int topK,
     double minScore,
     int maxContextChars,
-    boolean retrieveFavoritesOnly
+    boolean retrieveFavoritesOnly,
+    double vectorWeight,
+    double keywordWeight,
+    double metadataWeight
 ) {}

@@ -2,6 +2,7 @@ package com.zzp.aiagent.rag.model;
 
 import com.zzp.aiagent.gallery.model.GalleryPicture;
 import com.zzp.aiagent.profile.model.PictureAiProfile;
+import com.zzp.aiagent.rag.enhance.PackedRagContext;
 import com.zzp.aiagent.template.model.StyleTemplate;
 
 import java.util.ArrayList;
@@ -19,6 +20,7 @@ public class RagContext {
     private final List<ReferencePicture> retrievedReferences = new ArrayList<>();
     private final Map<String, Object> trace = new LinkedHashMap<>();
     private StyleTemplate styleTemplate;
+    private PackedRagContext packedContext;
 
     /**
      * 参考图组合：图库图片 + 可选的 AI 图片画像。
@@ -78,5 +80,14 @@ public class RagContext {
             trace.put(key, value);
         }
         return this;
+    }
+
+    public RagContext withPacked(PackedRagContext packed) {
+        this.packedContext = packed;
+        return this;
+    }
+
+    public PackedRagContext getPackedContext() {
+        return packedContext;
     }
 }

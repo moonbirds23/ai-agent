@@ -5,9 +5,12 @@ import com.zzp.aiagent.model.dto.chat.ChatRequest;
 import com.zzp.aiagent.profile.model.PictureAiProfile;
 import com.zzp.aiagent.rag.model.RagContext;
 import com.zzp.aiagent.rag.enhance.HybridGalleryRetriever;
+import com.zzp.aiagent.rag.enhance.RagCandidate;
 import com.zzp.aiagent.rag.enhance.RagContextPacker;
 import com.zzp.aiagent.rag.enhance.RagQueryRewriteService;
 import com.zzp.aiagent.rag.enhance.RagReranker;
+import com.zzp.aiagent.rag.enhance.RagRewriteResult;
+import com.zzp.aiagent.rag.enhance.RagTrace;
 import com.zzp.aiagent.rag.enhance.RagTraceService;
 import com.zzp.aiagent.template.StyleTemplateService;
 import com.zzp.aiagent.template.model.StyleTemplate;
@@ -21,9 +24,11 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
+import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.beans.factory.ObjectProvider;
 
 import java.time.LocalDateTime;
+import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 
@@ -38,14 +43,13 @@ import static org.mockito.Mockito.when;
 /**
  * <h3>测试目的</h3>
  * 验证 RagServiceImpl 三层增强编排逻辑的正确性：
- * - Layer 1 → Layer 2 → Layer 3 的优先级和决策条件
+ * - Layer 1 → Layer 2（增强检索）→ Layer 3 的优先级和决策条件
  * - 各层之间的短路/跳过逻辑
  * - useGalleryRag 关闭时的行为
  * - styleTemplateCode 显式指定时的行为
  *
  * <h3>测试分类</h3>
- * 集成测试（mock 依赖）。三层依赖（ExplicitReferenceResolver, GalleryRagRetriever, StyleTemplateService）
- * 全部 mock，只验证编排逻辑。
+ * 集成测试（mock 依赖）。所有增强组件全部 mock，只验证编排逻辑。
  */
 @DisplayName("RagServiceImpl：三层增强编排")
 @ExtendWith(MockitoExtension.class)
@@ -54,7 +58,6 @@ import static org.mockito.Mockito.when;
 class RagServiceImplTest {
 
     @Mock private ExplicitReferenceResolver explicitResolver;
-    @Mock private GalleryRagRetriever ragRetriever;
     @Mock private StyleTemplateService templateService;
     @Mock private RagProperties ragProperties;
     @Mock private ObjectProvider<RagQueryRewriteService> rewriteProvider;
@@ -62,31 +65,45 @@ class RagServiceImplTest {
     @Mock private ObjectProvider<RagReranker> rerankerProvider;
     @Mock private ObjectProvider<RagContextPacker> packerProvider;
     @Mock private ObjectProvider<RagTraceService> traceProvider;
+    @Mock private ObjectProvider<ChatMemory> chatMemoryProvider;
+
+    @Mock private RagQueryRewriteService rewriteService;
+    @Mock private HybridGalleryRetriever hybridRetriever;
+    @Mock private RagReranker reranker;
+    @Mock private RagContextPacker packer;
+    @Mock private RagTraceService traceService;
 
     private RagServiceImpl ragService;
 
     @BeforeEach
     void setUp() {
-        when(rewriteProvider.getIfAvailable()).thenReturn(null);
-        when(hybridProvider.getIfAvailable()).thenReturn(null);
-        when(rerankerProvider.getIfAvailable()).thenReturn(null);
-        when(packerProvider.getIfAvailable()).thenReturn(null);
-        when(traceProvider.getIfAvailable()).thenReturn(null);
+        when(rewriteProvider.getIfAvailable()).thenReturn(rewriteService);
+        when(hybridProvider.getIfAvailable()).thenReturn(hybridRetriever);
+        when(rerankerProvider.getIfAvailable()).thenReturn(reranker);
+        when(packerProvider.getIfAvailable()).thenReturn(packer);
+        when(traceProvider.getIfAvailable()).thenReturn(traceService);
+
+        // Default: rewrite returns fallback (same as original), retrieve returns empty
+        when(rewriteService.rewrite(anyString(), anyString()))
+                .thenReturn(RagRewriteResult.fallback("test"));
+        when(hybridRetriever.retrieve(any())).thenReturn(Collections.emptyList());
+        when(reranker.rerank(any(), any())).thenReturn(Collections.emptyList());
+
         when(ragProperties.topK()).thenReturn(5);
         when(ragProperties.minScore()).thenReturn(0.4);
         when(ragProperties.retrieveFavoritesOnly()).thenReturn(true);
         when(ragProperties.maxContextChars()).thenReturn(2500);
 
-        ragService = new RagServiceImpl(explicitResolver, ragRetriever, templateService,
+        ragService = new RagServiceImpl(explicitResolver, templateService,
                 ragProperties, rewriteProvider, hybridProvider, rerankerProvider,
-                packerProvider, traceProvider);
+                packerProvider, traceProvider, chatMemoryProvider);
     }
 
     private static GalleryPicture samplePic(long id, String name) {
         return new GalleryPicture(
                 id, "http://example.com/pic" + id + ".jpg", null, name, null,
                 null, null, null, null, null, null, null,
-                null, null, null, null, null, false, null, null, "MAIN"
+                null, null, null, null, null, false, null, null, "MAIN", null
         );
     }
 
@@ -138,25 +155,24 @@ class RagServiceImplTest {
         }
     }
 
-    // ── Layer 2: RAG 检索 ──────────────────────────────────────────
+    // ── Layer 2: RAG 增强检索 ──────────────────────────────────────
 
     @Nested
-    @DisplayName("Layer 2：RAG 向量检索")
+    @DisplayName("Layer 2：RAG 增强检索")
     class Layer2Rag {
 
         /**
-         * 目的：useGalleryRag 未设置（null）时，默认启用 RAG 检索。
+         * 目的：useGalleryRag 未设置（null）时，默认启用增强检索。
          */
         @Test
         @DisplayName("useGalleryRag 未设置(null) → 默认启用检索")
         void useGalleryRagNull_defaultsToEnabled() {
-            when(ragRetriever.retrieve(anyString())).thenReturn(List.of());
-
             ChatRequest req = new ChatRequest("卡通风格", null, true, null, null,
                     "image_generation", null, null, null, null, null);
             ragService.buildContext(req);
 
-            verify(ragRetriever).retrieve("卡通风格");
+            verify(rewriteService).rewrite("卡通风格", "");
+            verify(hybridRetriever).retrieve(any());
         }
 
         /**
@@ -165,13 +181,12 @@ class RagServiceImplTest {
         @Test
         @DisplayName("useGalleryRag=true → 启用检索")
         void useGalleryRagTrue_enablesRetrieval() {
-            when(ragRetriever.retrieve(anyString())).thenReturn(List.of());
-
             ChatRequest req = new ChatRequest("卡通风格", null, true, null, null,
                     "image_generation", null, true, null, null, null);
             ragService.buildContext(req);
 
-            verify(ragRetriever).retrieve("卡通风格");
+            verify(rewriteService).rewrite("卡通风格", "");
+            verify(hybridRetriever).retrieve(any());
         }
 
         /**
@@ -184,7 +199,8 @@ class RagServiceImplTest {
                     "image_generation", null, false, null, null, null);
             ragService.buildContext(req);
 
-            verify(ragRetriever, never()).retrieve(anyString());
+            verify(rewriteService, never()).rewrite(anyString(), anyString());
+            verify(hybridRetriever, never()).retrieve(any());
         }
 
         /**
@@ -193,9 +209,11 @@ class RagServiceImplTest {
         @Test
         @DisplayName("检索到结果 → retrieved 列表含结果")
         void retrievedResults_inContext() {
-            RagContext.ReferencePicture ref = new RagContext.ReferencePicture(
-                    samplePic(1L, "检索图1"), sampleProfile(1L));
-            when(ragRetriever.retrieve(anyString())).thenReturn(List.of(ref));
+            GalleryPicture pic = samplePic(1L, "检索图1");
+            PictureAiProfile profile = sampleProfile(1L);
+            RagCandidate candidate = new RagCandidate(pic, profile,
+                    0.7, 10, 15, 0.0, List.of("语义高度匹配"));
+            when(reranker.rerank(any(), any())).thenReturn(List.of(candidate));
 
             ChatRequest req = new ChatRequest("卡通风格", null, true, null, null,
                     "image_generation", null, true, null, null, null);
@@ -215,7 +233,8 @@ class RagServiceImplTest {
                     "image_generation", null, true, null, null, null);
             ragService.buildContext(req);
 
-            verify(ragRetriever, never()).retrieve(anyString());
+            verify(rewriteService, never()).rewrite(anyString(), anyString());
+            verify(hybridRetriever, never()).retrieve(any());
         }
     }
 
@@ -231,7 +250,6 @@ class RagServiceImplTest {
         @Test
         @DisplayName("L1+L2 都为空 → 触发模板匹配")
         void bothEmpty_triggersTemplate() {
-            when(ragRetriever.retrieve(anyString())).thenReturn(List.of());
             when(templateService.match(anyString())).thenReturn(Optional.empty());
 
             ChatRequest req = new ChatRequest("PPT汇报", null, true, null, null,
@@ -264,9 +282,10 @@ class RagServiceImplTest {
         @Test
         @DisplayName("L2 有数据 → 不触发模板匹配")
         void layer2Filled_skipsTemplate() {
-            RagContext.ReferencePicture ref = new RagContext.ReferencePicture(
-                    samplePic(1L, "pic1"), sampleProfile(1L));
-            when(ragRetriever.retrieve(anyString())).thenReturn(List.of(ref));
+            GalleryPicture pic = samplePic(1L, "pic1");
+            RagCandidate candidate = new RagCandidate(pic, sampleProfile(1L),
+                    0.7, 10, 15, 0.0, List.of());
+            when(reranker.rerank(any(), any())).thenReturn(List.of(candidate));
 
             ChatRequest req = new ChatRequest("PPT汇报", null, true, null, null,
                     "image_generation", null, true, null, null, null);
@@ -281,7 +300,6 @@ class RagServiceImplTest {
         @Test
         @DisplayName("模板匹配成功 → 模板出现在上下文中")
         void templateMatched_inContext() {
-            when(ragRetriever.retrieve(anyString())).thenReturn(List.of());
             StyleTemplate tmpl = new StyleTemplate("ppt-business-flat", "PPT商务扁平",
                     "work_study", "ppt", List.of("PPT"), "prompt", null, "16:9");
             when(templateService.match(anyString())).thenReturn(Optional.of(tmpl));
@@ -300,7 +318,6 @@ class RagServiceImplTest {
         @Test
         @DisplayName("指定 styleTemplateCode → 用 getByCode 精确查找")
         void explicitCode_usesGetByCode() {
-            when(ragRetriever.retrieve(anyString())).thenReturn(List.of());
             StyleTemplate tmpl = new StyleTemplate("custom-code", "自定义", null,
                     null, null, null, null, null);
             when(templateService.getByCode("custom-code")).thenReturn(Optional.of(tmpl));
@@ -322,18 +339,19 @@ class RagServiceImplTest {
     class CombinedScenarios {
 
         /**
-         * 目的：L1+L2+L3 同时有数据时，L3 不触发（因 L1 有数据）。
-         * 但 L2 仍然在 L1 有数据时触发（L2 与 L1 并行，只有 L3 受 L1/L2 短路控制）。
+         * 目的：L1+L2 同时有数据时，L3 不触发（因 L1 有数据）。
          */
         @Test
         @DisplayName("L1 存在 → L2 仍然检索，L3 短路")
         void layer1And2_active_layer3_skipped() {
             RagContext.ReferencePicture ref1 = new RagContext.ReferencePicture(
                     samplePic(1L, "明确图"), sampleProfile(1L));
-            RagContext.ReferencePicture ref2 = new RagContext.ReferencePicture(
-                    samplePic(2L, "检索图"), sampleProfile(2L));
             when(explicitResolver.resolve(anyList())).thenReturn(List.of(ref1));
-            when(ragRetriever.retrieve(anyString())).thenReturn(List.of(ref2));
+
+            GalleryPicture pic2 = samplePic(2L, "检索图");
+            RagCandidate candidate = new RagCandidate(pic2, sampleProfile(2L),
+                    0.7, 10, 15, 0.0, List.of());
+            when(reranker.rerank(any(), any())).thenReturn(List.of(candidate));
 
             ChatRequest req = new ChatRequest("卡通", null, true, null, null,
                     "image_generation", List.of(1L), true, null, null, null);
@@ -355,7 +373,8 @@ class RagServiceImplTest {
                     "image_generation", null, true, null, null, null);
             ragService.buildContext(req);
 
-            verify(ragRetriever, never()).retrieve(anyString());
+            verify(rewriteService, never()).rewrite(anyString(), anyString());
+            verify(hybridRetriever, never()).retrieve(any());
             verify(templateService, never()).match(anyString());
         }
     }

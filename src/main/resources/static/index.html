@@ -53,6 +53,9 @@ body{font:14px/1.5 'Microsoft YaHei',sans-serif;background:#e8ecf1;display:flex;
 .gallery-card .star:not(.fav){color:#ccc}
 .gallery-card .analyze{font-size:10px;color:#1890ff;cursor:pointer;text-decoration:underline}
 .gallery-card .analyze:hover{color:#40a9ff}
+.gallery-card .delete-btn{font-size:12px;color:#ff4d4f;cursor:pointer;margin-left:6px;font-weight:700}
+.gallery-card .delete-btn:hover{color:#ff7875}
+#upload-form button:disabled{opacity:.6;cursor:not-allowed}
 .gallery-card .overlay{position:absolute;top:4px;right:4px;width:18px;height:18px;border-radius:3px;background:rgba(255,255,255,.9);display:flex;align-items:center;justify-content:center;font-size:11px;color:#1890ff;opacity:0;transition:opacity .15s}
 .gallery-card.selected .overlay,.gallery-card:hover .overlay{opacity:1}
 
@@ -183,7 +186,7 @@ select:focus,.right-select:focus{border-color:#1890ff}
           </div>
         </div>
 
-        <input type="file" id="hidden-file-input" accept="image/png,image/jpeg,image/jpg,image/webp,image/gif" style="display:none" onchange="onUploadFileSelect(event)">
+        <input type="file" id="hidden-file-input" accept="image/png,image/jpeg,image/jpg,image/webp,image/gif" style="display:none" multiple onchange="onUploadFileSelect(event)">
 
         <div class="gallery-grid" id="gallery-grid">
           <div class="gallery-loading">加载中...</div>
@@ -316,7 +319,7 @@ let selectedReferences = [];   // array of GalleryPicture ids
 let galleryPictures = [];      // loaded gallery pictures cache
 let useGalleryRag = true;
 let saveGeneratedToGallery = false;
-let uploadFileBase64 = null;
+let uploadFiles = [];  // {name, base64}[]
 let templates = [];
 const MSG = document.getElementById('messages');
 const INPUT = document.getElementById('input');
@@ -648,6 +651,7 @@ function renderGallery(pictures) {
           <div class="row">
             <span class="star${favClass ? ' ' + favClass : ''}" onclick="event.stopPropagation();toggleFavorite(${p.id})">${favClass ? '★' : '☆'}</span>
             <span class="analyze" onclick="event.stopPropagation();analyzePicture(${p.id})">分析</span>
+            <span class="delete-btn" onclick="event.stopPropagation();deletePicture(${p.id})" title="删除">&times;</span>
           </div>
         </div>
       </div>`;
@@ -731,16 +735,35 @@ async function analyzePicture(id) {
   }
 }
 
+async function deletePicture(id) {
+  if (!confirm('确定删除该图片？此操作不可撤销。')) return;
+  try {
+    const resp = await fetch('/api/gallery/' + id, { method: 'DELETE' });
+    const result = await resp.json();
+    if (result.code === 0) {
+      toast('已删除');
+      const refIdx = selectedReferences.indexOf(id);
+      if (refIdx >= 0) selectedReferences.splice(refIdx, 1);
+      renderRefList();
+      loadGallery();
+    } else {
+      toast('删除失败: ' + result.message);
+    }
+  } catch (e) {
+    toast('网络异常');
+  }
+}
+
 /* ====== UPLOAD ====== */
 function showUploadForm() {
   document.getElementById('upload-form').classList.add('show');
   document.getElementById('upload-file-name').textContent = '未选择文件';
-  uploadFileBase64 = null;
+  uploadFiles = [];
 }
 
 function hideUploadForm() {
   document.getElementById('upload-form').classList.remove('show');
-  uploadFileBase64 = null;
+  uploadFiles = [];
 }
 
 function triggerFilePicker() {
@@ -748,56 +771,85 @@ function triggerFilePicker() {
 }
 
 function onUploadFileSelect(e) {
-  const file = e.target.files[0];
-  if (!file) return;
-  document.getElementById('upload-file-name').textContent = file.name;
-  const reader = new FileReader();
-  reader.onload = () => {
-    uploadFileBase64 = reader.result;
-  };
-  reader.readAsDataURL(file);
+  const files = Array.from(e.target.files);
+  if (files.length === 0) return;
+  uploadFiles = [];
+  const label = document.getElementById('upload-file-name');
+  label.textContent = '读取中...';
+
+  let loaded = 0;
+  files.forEach((file, i) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      uploadFiles.push({ name: file.name.replace(/\.[^.]+$/, ''), base64: reader.result });
+      loaded++;
+      label.textContent = `已选 ${loaded}/${files.length} 个文件`;
+      if (loaded === files.length) {
+        // 自动填充名称为第一个文件名
+        if (!document.getElementById('upload-name').value.trim()) {
+          document.getElementById('upload-name').value = uploadFiles[0].name;
+        }
+      }
+    };
+    reader.readAsDataURL(file);
+  });
 }
 
 async function doUpload() {
-  if (!uploadFileBase64) {
+  if (uploadFiles.length === 0) {
     toast('请先选择图片文件');
     return;
   }
+  if (uploading) return;
+  uploading = true;
+  const confirmBtn = document.querySelector('#upload-form .row button.confirm');
+  const origText = confirmBtn.textContent;
+  confirmBtn.disabled = true;
+
   const name = document.getElementById('upload-name').value.trim();
   const category = document.getElementById('upload-category').value.trim();
   const tagsStr = document.getElementById('upload-tags').value.trim();
   const tags = tagsStr ? tagsStr.split(',').map(s => s.trim()).filter(Boolean) : [];
 
-  const body = {
-    imageBase64: uploadFileBase64,
-    name: name || null,
-    introduction: null,
-    category: category || null,
-    tags: tags.length > 0 ? tags : null
-  };
-
-  try {
-    const resp = await fetch('/api/gallery/upload', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body)
-    });
-    const result = await resp.json();
-    if (result.code === 0) {
-      toast('上传成功');
-      hideUploadForm();
-      // Reset form
-      document.getElementById('upload-name').value = '';
-      document.getElementById('upload-category').value = '';
-      document.getElementById('upload-tags').value = '';
-      document.getElementById('hidden-file-input').value = '';
-      loadGallery();
-    } else {
-      toast('上传失败: ' + result.message);
+  let ok = 0, fail = 0, dup = 0;
+  for (let i = 0; i < uploadFiles.length; i++) {
+    const f = uploadFiles[i];
+    confirmBtn.textContent = `上传中 ${i + 1}/${uploadFiles.length}...`;
+    const body = {
+      imageBase64: f.base64,
+      name: name || f.name,
+      introduction: null,
+      category: category || null,
+      tags: tags.length > 0 ? tags : null
+    };
+    try {
+      const resp = await fetch('/api/gallery/upload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      const result = await resp.json();
+      if (result.code === 0) {
+        ok++;
+      } else {
+        fail++;
+      }
+    } catch (e) {
+      fail++;
     }
-  } catch (e) {
-    toast('网络异常');
   }
+
+  toast(`上传完成: ${ok} 成功` + (dup > 0 ? `, ${dup} 重复` : '') + (fail > 0 ? `, ${fail} 失败` : ''));
+  hideUploadForm();
+  document.getElementById('upload-name').value = '';
+  document.getElementById('upload-category').value = '';
+  document.getElementById('upload-tags').value = '';
+  document.getElementById('hidden-file-input').value = '';
+  loadGallery();
+
+  uploading = false;
+  confirmBtn.textContent = origText;
+  confirmBtn.disabled = false;
 }
 
 /* ====== URL IMPORT ====== */

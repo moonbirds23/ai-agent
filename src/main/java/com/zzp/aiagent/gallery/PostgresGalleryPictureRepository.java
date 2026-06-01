@@ -5,7 +5,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zzp.aiagent.gallery.model.GalleryPicture;
 import com.zzp.aiagent.gallery.model.StorageLocation;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.context.annotation.Primary;
 import org.springframework.context.annotation.Profile;
 import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.RowMapper;
@@ -21,8 +20,7 @@ import java.util.List;
 import java.util.Optional;
 
 @Repository
-@Profile("postgres")
-@Primary
+@Profile("!test")
 @Slf4j
 public class PostgresGalleryPictureRepository implements GalleryPictureRepository {
 
@@ -64,7 +62,8 @@ public class PostgresGalleryPictureRepository implements GalleryPictureRepositor
                 rs.getBoolean("favorited"),
                 rs.getTimestamp("create_time") != null ? rs.getTimestamp("create_time").toLocalDateTime() : null,
                 rs.getTimestamp("update_time") != null ? rs.getTimestamp("update_time").toLocalDateTime() : null,
-                rs.getString("storage_location")
+                rs.getString("storage_location"),
+                rs.getString("pic_hash")
         );
     };
 
@@ -77,11 +76,11 @@ public class PostgresGalleryPictureRepository implements GalleryPictureRepositor
                 INSERT INTO gallery_picture (url, thumbnail_url,
                     name, introduction, category, tags, pic_size, pic_width, pic_height, pic_scale,
                     pic_format, user_id, space_id, review_status, pic_color, source_type, favorited,
-                    storage_location)
+                    storage_location, pic_hash)
                 VALUES (:url, :thumbnailUrl,
                     :name, :introduction, :category, :tags::jsonb, :picSize, :picWidth, :picHeight, :picScale,
                     :picFormat, :userId, :spaceId, :reviewStatus, :picColor, :sourceType, :favorited,
-                    :storageLocation)
+                    :storageLocation, :picHash)
                 """;
         String tagsJson = null;
         try {
@@ -152,6 +151,14 @@ public class PostgresGalleryPictureRepository implements GalleryPictureRepositor
     }
 
     @Override
+    public List<GalleryPicture> findByHash(String picHash) {
+        if (picHash == null || picHash.isBlank()) return Collections.emptyList();
+        return jdbc.query(
+                "SELECT * FROM gallery_picture WHERE pic_hash=:picHash AND is_delete=0",
+                new MapSqlParameterSource("picHash", picHash), ROW_MAPPER);
+    }
+
+    @Override
     public List<GalleryPicture> findExpiredCache(LocalDateTime cutoffTime) {
         String sql = """
                 SELECT * FROM gallery_picture
@@ -183,6 +190,7 @@ public class PostgresGalleryPictureRepository implements GalleryPictureRepositor
                 .addValue("picColor", p.picColor())
                 .addValue("sourceType", p.sourceType())
                 .addValue("favorited", p.favorited())
-                .addValue("storageLocation", p.storageLocation());
+                .addValue("storageLocation", p.storageLocation())
+                .addValue("picHash", p.picHash());
     }
 }

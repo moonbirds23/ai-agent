@@ -15,10 +15,10 @@ public class RagQueryRewriteServiceImpl implements RagQueryRewriteService {
 
     private static final String SYSTEM_PROMPT = """
             你是图库检索查询改写助手。根据用户的图片生成需求，提取结构化检索条件，用于从图库中搜索参考图片。
-
+            
             你必须严格按照JSON格式输出（不要输出markdown代码块标记）：
             {"searchQuery":"改写后的检索关键词","category":"分类或null","tags":["标签1"],"styleHints":["风格提示"],"colorHints":["色彩提示"],"compositionHints":["构图提示"],"referenceMode":"overall或null","templateHint":"模板代码或null"}
-
+            
             规则：
             - searchQuery: 提取核心视觉词汇，改写为更适合检索的关键词（中文），保留画面主体
             - category: 推断分类 landscape/portrait/abstract/architecture/anime/photo/illustration，不确定则null

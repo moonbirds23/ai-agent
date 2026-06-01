@@ -13,6 +13,8 @@ import com.zzp.aiagent.rag.enhance.RagTraceService;
 import com.zzp.aiagent.rag.model.RagContext;
 import com.zzp.aiagent.template.StyleTemplateService;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.ai.chat.memory.ChatMemory;
+import org.springframework.ai.chat.messages.Message;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
@@ -28,30 +30,27 @@ import java.util.Map;
 public class RagServiceImpl implements RagService {
 
     private final ExplicitReferenceResolver explicitResolver;
-    private final GalleryRagRetriever ragRetriever;
     private final StyleTemplateService templateService;
     private final RagProperties ragProperties;
 
-    // Enhance components — only available when postgres profile is active
+    // Enhance components
     private final RagQueryRewriteService rewriteService;
     private final HybridGalleryRetriever hybridRetriever;
     private final RagReranker reranker;
     private final RagContextPacker packer;
     private final RagTraceService traceService;
-
-    private final boolean enhanceAvailable;
+    private final ChatMemory chatMemory;
 
     public RagServiceImpl(ExplicitReferenceResolver explicitResolver,
-                          GalleryRagRetriever ragRetriever,
                           StyleTemplateService templateService,
                           RagProperties ragProperties,
                           ObjectProvider<RagQueryRewriteService> rewriteProvider,
                           ObjectProvider<HybridGalleryRetriever> hybridProvider,
                           ObjectProvider<RagReranker> rerankerProvider,
                           ObjectProvider<RagContextPacker> packerProvider,
-                          ObjectProvider<RagTraceService> traceProvider) {
+                          ObjectProvider<RagTraceService> traceProvider,
+                          ObjectProvider<ChatMemory> chatMemoryProvider) {
         this.explicitResolver = explicitResolver;
-        this.ragRetriever = ragRetriever;
         this.templateService = templateService;
         this.ragProperties = ragProperties;
         this.rewriteService = rewriteProvider.getIfAvailable();
@@ -59,8 +58,7 @@ public class RagServiceImpl implements RagService {
         this.reranker = rerankerProvider.getIfAvailable();
         this.packer = packerProvider.getIfAvailable();
         this.traceService = traceProvider.getIfAvailable();
-        this.enhanceAvailable = rewriteService != null && hybridRetriever != null
-                && reranker != null && packer != null;
+        this.chatMemory = chatMemoryProvider.getIfAvailable();
     }
 
     @Override
@@ -77,17 +75,20 @@ public class RagServiceImpl implements RagService {
             }
         }
 
-        // Layer 2: RAG 检索
-        if (request.useGalleryRag() == null || request.useGalleryRag()) {
-            if (enhanceAvailable && originalQuery != null && !originalQuery.isBlank()) {
-                layer2Enhance(ctx, request, originalQuery);
-            } else {
-                layer2Legacy(ctx, originalQuery);
-            }
+        // Layer 2: RAG 增强检索
+        if ((request.useGalleryRag() == null || request.useGalleryRag())
+                && originalQuery != null && !originalQuery.isBlank()) {
+            layer2Enhance(ctx, request, originalQuery);
         }
 
         // Layer 3: 风格模板降级兜底
         layer3Template(ctx, request);
+
+        // Pack and truncate context (referenceMode trimming + maxContextChars limit)
+        if (packer != null && !ctx.isEmpty()) {
+            RagSearchCriteria criteria = (RagSearchCriteria) ctx.getTrace().get("criteria");
+            ctx.withPacked(packer.pack(ctx, criteria));
+        }
 
         // Trace
         if (traceService != null) {
@@ -102,18 +103,18 @@ public class RagServiceImpl implements RagService {
                     templateCode, null, latency, null));
         }
 
-        log.info("[RagService] 上下文构建完成: explicit={}, retrieved={}, template={}, enhance={}",
+        log.info("[RagService] 上下文构建完成: explicit={}, retrieved={}, template={}",
                 ctx.getExplicitReferences().size(),
                 ctx.getRetrievedReferences().size(),
-                ctx.getStyleTemplate() != null ? ctx.getStyleTemplate().code() : "none",
-                enhanceAvailable);
+                ctx.getStyleTemplate() != null ? ctx.getStyleTemplate().code() : "none");
         return ctx;
     }
 
     // ── Layer 2: 增强路径 ────────────────────────────────────────────
 
     private void layer2Enhance(RagContext ctx, ChatRequest request, String originalQuery) {
-        RagRewriteResult rewrite = rewriteService.rewrite(originalQuery, "");
+        String conversationHistory = buildConversationHistory(request.chatId());
+        RagRewriteResult rewrite = rewriteService.rewrite(originalQuery, conversationHistory);
         ctx.putTrace("rewrittenQuery", rewrite.searchQuery());
 
         String effectiveMode = resolveReferenceMode(rewrite, request);
@@ -161,16 +162,6 @@ public class RagServiceImpl implements RagService {
         ctx.putTrace("selectedSummary", selectedSummary);
     }
 
-    // ── Layer 2: 传统路径 ────────────────────────────────────────────
-
-    private void layer2Legacy(RagContext ctx, String query) {
-        if (query == null || query.isBlank()) return;
-        List<RagContext.ReferencePicture> retrieved = ragRetriever.retrieve(query);
-        for (RagContext.ReferencePicture ref : retrieved) {
-            ctx.addRetrieved(ref);
-        }
-    }
-
     // ── Layer 3 ──────────────────────────────────────────────────────
 
     private void layer3Template(RagContext ctx, ChatRequest request) {
@@ -189,6 +180,31 @@ public class RagServiceImpl implements RagService {
     }
 
     // ── helpers ──────────────────────────────────────────────────────
+
+    private String buildConversationHistory(String conversationId) {
+        if (chatMemory == null || conversationId == null) return "";
+        try {
+            List<Message> messages = chatMemory.get(conversationId);
+            if (messages == null || messages.isEmpty()) return "";
+            // Only process the last 20 messages to keep history compact
+            int start = Math.max(0, messages.size() - 20);
+            StringBuilder sb = new StringBuilder();
+            for (int i = start; i < messages.size(); i++) {
+                Message msg = messages.get(i);
+                String text = msg.getText();
+                if (text == null || text.isBlank()) continue;
+                if (!sb.isEmpty()) sb.append("\n");
+                String roleLabel = "USER".equals(msg.getMessageType().name()) ? "用户" : "助手";
+                // Truncate to avoid polluting the rewrite prompt
+                String truncated = text.length() > 200 ? text.substring(0, 200) + "..." : text;
+                sb.append(roleLabel).append(": ").append(truncated);
+            }
+            return sb.toString();
+        } catch (Exception e) {
+            log.warn("[RagService] 获取对话历史失败 conversationId={}: {}", conversationId, e.getMessage());
+            return "";
+        }
+    }
 
     private String resolveReferenceMode(RagRewriteResult rewrite, ChatRequest request) {
         if (rewrite.referenceMode() != null) return rewrite.referenceMode();

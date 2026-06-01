@@ -16,7 +16,7 @@ import java.util.List;
 import java.util.Map;
 
 @Repository
-@Profile("postgres")
+@Profile("!test")
 @Slf4j
 public class JdbcChatHistoryRepository implements ChatHistoryRepository {
 

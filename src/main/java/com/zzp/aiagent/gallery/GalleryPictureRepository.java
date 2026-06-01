@@ -20,4 +20,7 @@ public interface GalleryPictureRepository {
 
     /** 查询过期缓存图片：storage_location='CACHE' 且 create_time < cutoffTime */
     List<GalleryPicture> findExpiredCache(LocalDateTime cutoffTime);
+
+    /** 按图片哈希查重（MD5/SHA256） */
+    List<GalleryPicture> findByHash(String picHash);
 }

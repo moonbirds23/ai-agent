@@ -1,5 +1,6 @@
 package com.zzp.aiagent.rag.enhance;
 
+import com.zzp.aiagent.rag.RagProperties;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
@@ -10,9 +11,11 @@ import java.util.List;
 @Profile("!test")
 public class RagRerankerImpl implements RagReranker {
 
-    private static final double VECTOR_WEIGHT = 50.0;
-    private static final double KEYWORD_WEIGHT = 15.0;
-    private static final double METADATA_WEIGHT = 10.0;
+    private final RagProperties ragProperties;
+
+    public RagRerankerImpl(RagProperties ragProperties) {
+        this.ragProperties = ragProperties;
+    }
 
     @Override
     public List<RagCandidate> rerank(List<RagCandidate> candidates, RagSearchCriteria criteria) {
@@ -22,9 +25,9 @@ public class RagRerankerImpl implements RagReranker {
 
         return candidates.stream()
                 .map(c -> {
-                    double finalScore = c.vectorScore() * VECTOR_WEIGHT
-                            + c.keywordScore() * KEYWORD_WEIGHT
-                            + c.metadataScore() * METADATA_WEIGHT;
+                    double finalScore = c.vectorScore() * ragProperties.vectorWeight()
+                            + c.keywordScore() * ragProperties.keywordWeight()
+                            + c.metadataScore() * ragProperties.metadataWeight();
                     List<String> reasons = buildReasons(c, finalScore);
                     return new RagCandidate(c.picture(), c.profile(),
                             c.vectorScore(), c.keywordScore(), c.metadataScore(),

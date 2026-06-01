@@ -2,7 +2,6 @@ package com.zzp.aiagent.profile;
 
 import com.zzp.aiagent.profile.model.PictureAiProfile;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.context.annotation.Primary;
 import org.springframework.context.annotation.Profile;
 import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.RowMapper;
@@ -17,8 +16,7 @@ import java.util.List;
 import java.util.Optional;
 
 @Component
-@Profile("postgres")
-@Primary
+@Profile("!test")
 @Slf4j
 public class PostgresPictureAiProfileRepository implements PictureAiProfileRepository {
 

@@ -15,6 +15,14 @@ spring:
         embeddings-path: /embeddings
         options:
           model: embedding-2
+    vectorstore:
+      pgvector:
+        initialize-schema: true
+        index-type: ivfflat
+        distance-type: cosine_distance
+        dimensions: 1024
+        schema-name: public
+        table-name: picture_vector_store
   data:
     redis:
       host: ${REDIS_HOST:localhost}
@@ -26,6 +34,14 @@ spring:
           max-active: 8
           max-idle: 4
           min-idle: 1
+  datasource:
+    url: jdbc:postgresql://localhost:5432/ai_agent
+    username: ${DB_USERNAME:postgres}
+    password: ${DB_PASSWORD:}
+    driver-class-name: org.postgresql.Driver
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
   application:
     name: aiagent
 
@@ -35,7 +51,10 @@ app:
     top-k: 5
     min-score: 0.4
     max-context-chars: 2500
-    retrieve-favorites-only: true
+    retrieve-favorites-only: false
+    vector-weight: 50.0
+    keyword-weight: 15.0
+    metadata-weight: 10.0
   chat-memory:
     max-messages: 50
     ttl-days: 7
@@ -43,6 +62,8 @@ app:
   gallery:
     cache-max-age-days: 7
     cache-cleanup-cron: "0 0 3 * * ?"
+  vector:
+    type: postgres
 
 zhipu:
   api-key: ${ZHIPU_API_KEY:}

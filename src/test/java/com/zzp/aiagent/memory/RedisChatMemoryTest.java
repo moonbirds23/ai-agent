@@ -253,7 +253,7 @@ class RedisChatMemoryTest {
         var galleryService = mock(com.zzp.aiagent.gallery.GalleryService.class);
         when(galleryService.getById(42L)).thenReturn(new com.zzp.aiagent.gallery.model.GalleryPicture(
                 42L, "/api/gallery/files/42", null, "测试图", null, null, null, null, null, null,
-                null, null, 1L, 0L, 1, null, "upload", false, null, null, "MAIN"));
+                null, null, 1L, 0L, 1, null, "upload", false, null, null, "MAIN", null));
 
         ObjectProvider galleryProvider = mock(ObjectProvider.class);
         when(galleryProvider.getIfAvailable()).thenReturn(galleryService);

@@ -41,7 +41,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 项目定位
 
-云图库 AI 图片生成助手。全链路已切换智谱（`glm-4-flash` 文本 + `glm-4.5v` 视觉 + `embedding-2` 嵌入 + CogView 生图）。Spring AI 已升级 1.0.0 GA（2025-05-20 发布），M6→GA API 破坏性迁移已完成（Advisor/ChatMemory/ChatClient 全部适配）。已引入 PostgreSQL（含 Flyway 迁移）+ pgvector 向量库 + 对象存储抽象（local/COS 双实现）。后续迁移融合到 Picture-Backend。
+云图库 AI 图片生成助手。全链路已切换智谱（`glm-4-flash` 文本 + `glm-4.5v` 视觉 + `embedding-2` 嵌入 + CogView 生图）。Spring AI 已升级 1.0.0 GA（2025-05-20 发布），M6→GA API 破坏性迁移已完成（Advisor/ChatMemory/ChatClient 全部适配）。PostgreSQL（含 Flyway 迁移）+ pgvector 向量库 + 对象存储抽象（local/COS 双实现）为默认存储后端。后续迁移融合到 Picture-Backend。
 
 **编码规范对齐 Picture-Backend**（`D:\code\java\Picture-Backend`），后续两个项目将代码迁移融合上线。
 
@@ -50,6 +50,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Spring Boot 3.5.14 + Java 21
 - 构建工具：Maven（`mvn`），系统 JDK 1.8，需指定 `JAVA_HOME="D:/develop/java/JDK/jdk-21"`
 - 端口 `8231`，context-path `/api`
+- **Git push 需要代理**：`git config --global http.proxy http://127.0.0.1:6234`
 
 ## 常用命令
 
@@ -87,7 +88,7 @@ com.zzp.aiagent
   │     │     ├── chat/ChatRequest.java     （含 RAG 字段：referencePictureIds/useGalleryRag/...）
   │     │     ├── image/ImageAgentResponse.java（AI 层结构化输出）
   │     │     ├── image/ImageGenerationResult.java
-  │     │     └── memory/MessageRecord.java （含 mediaUrls）
+  │     │     └── memory/MessageRecord.java （含 imageRefs）
   │     └── vo/         响应 VO
   │           ├── ChatResponseVO.java       （含 ragDebugInfo Object 字段）
   │           └── StreamEventVO.java        （含 progress 事件）
@@ -95,15 +96,14 @@ com.zzp.aiagent
   ├── app/              应用层（PictureApp，RAG 增强生图链路）
   ├── advisor/          Advisor 拦截链
   ├── memory/           会话记忆（RedisChatMemory，含 media 序列化）
-  ├── gallery/          图库管理（单用户模式，JSON/PG 双存储）
-  │     ├── model/GalleryPicture.java     图片元数据 record (23字段)
+  ├── gallery/          图库管理（单用户模式，PG 存储）
+  │     ├── model/GalleryPicture.java     图片元数据 record (24字段，含 picHash)
   │     ├── model/StorageLocation.java    存储位置常量 MAIN/CACHE
   │     ├── model/GalleryUploadRequest.java
   │     ├── GalleryService.java          上传/导入/分页/收藏/删除
   │     ├── GalleryProperties.java        @ConfigurationProperties("app.gallery")
   │     ├── GalleryCacheCleanupTask.java  @Scheduled 缓存图库定时清理
-  │     ├── PostgresGalleryPictureRepository.java  @Profile("postgres") + @Primary
-  │     └── JsonFileGalleryPictureRepository.java  @Profile("!test & !postgres")
+  │     └── PostgresGalleryPictureRepository.java  @Profile("!test")
   ├── profile/          图片 AI 画像
   │     ├── model/PictureAiProfile.java  视觉分析结果 + indexText + vectorStatus
   │     └── PictureAiProfileService.java 分析/索引/删除
@@ -114,8 +114,7 @@ com.zzp.aiagent
   │     └── StorageProperties.java         @ConfigurationProperties("app.storage")
   ├── vector/            向量索引抽象（Phase 4）
   │     ├── VectorIndexService.java      upsert/delete/search
-  │     ├── SimpleVectorIndexService.java  @Profile("!postgres") 基于 SimpleVectorStore
-  │     └── PgVectorIndexService.java      @Profile("postgres") 基于 PgVectorStore
+  │     └── PgVectorIndexService.java      @Profile("!test") 基于 PgVectorStore
   ├── rag/              三层 RAG 增强
   │     ├── enhanc/                      RAG 增强链路接口（Phase 5）
   │     │     ├── RagQueryRewriteService.java  LLM Query 改写
@@ -125,8 +124,7 @@ com.zzp.aiagent
   │     │     └── RagTraceService.java         调试追踪
   │     ├── model/RagContext.java        三层上下文对象
   │     ├── ExplicitReferenceResolver.java  Layer 1 显式参考图解析
-  │     ├── GalleryRagRetriever.java       Layer 2 向量检索
-  │     ├── RagServiceImpl.java           Layer 3 模板兜底编排
+  │     ├── RagServiceImpl.java           RAG 增强编排（L1+L2增强+L3）
   │     └── PromptReferenceAssembler.java Prompt 装配 + 调试数据构建
   ├── template/         系统风格模板
   │     ├── model/StyleTemplate.java     模板 record
@@ -235,7 +233,7 @@ ThrowUtils.throwIf(condition, ErrorCode.XXX, "详情");
 ### 执行顺序
 
 ```
-ContentGuard(0) → MessageChatMemory(内置) → PromptOptimize(20) → Logging(30) → ExceptionGuard(MAX)
+ContentGuard(0) → MessageChatMemory(内置) → RagInjection(15) → PromptOptimize(20) → Logging(30) → ExceptionGuard(MAX)
 ```
 
 ### Advisor 不可变 Record 约束
@@ -267,16 +265,14 @@ Advisor 内抛 `BusinessException` → `ExceptionGuardAdvisor`（order=MAX）兜
 | **ChatClientMessageAggregator 替代 MessageAggregator** | 1.0.0 GA 新增 `ChatClientMessageAggregator`（`spring-ai-client-chat`），`MessageAggregator`（`spring-ai-model`）降级为处理裸 `ChatResponse`。LoggingAdvisor 已迁移到新 API |
 | **Chain 不再是函数式接口** | `CallAdvisorChain`/`StreamAdvisorChain` 在 1.0.0 各有 2 个抽象方法，测试中不能再 `chain -> response` lambda，须用 `mock(CallAdvisorChain.class)` |
 | **JDBC 依赖触发 DataSource 自动配置** | 加入 `spring-boot-starter-jdbc` 后需在 test profile 排除 `DataSourceAutoConfiguration` + `FlywayAutoConfiguration`，否则容器启动失败 |
-| **PostgreSQL profile 策略** | `postgres` profile 激活 `Postgres*Repository`（@Primary 覆盖 JsonFile），PgVectorStore 覆盖 SimpleVectorStore。默认 profiles（无 postgres）走 local JSON + SimpleVectorStore |
+| **PostgreSQL 为默认存储后端** | 2026-06 起 PG 成为唯一存储实现，经典 RAG Layer 2（`GalleryRagRetriever`）、`SimpleVectorStore`、JSON 文件存储（`JsonFile*Repository`/`NoopChatHistoryRepository`）已删除。PG 默认启用（`@SpringBootApplication` 不做 exclude），test profile 通过 `application-test.yml` 的 `spring.autoconfigure.exclude` 排除 DataSource/Flyway。本地开发需 PG 运行中 + 数据库 `ai_agent` 已创建 |
+| **@SpringBootApplication(exclude) 不能被 @ImportAutoConfiguration 覆盖** | `@SpringBootApplication(exclude = {DataSourceAutoConfiguration.class})` 会将类加入全局排除列表，即使另外的 `@Configuration` 类用 `@ImportAutoConfiguration` 重新导入也无效。排除 DataSource 应该用 profile 条件（`application-test.yml` 的 `spring.autoconfigure.exclude`），而不是在主类上 exclude |
 | **API Key 不入库** | 通过环境变量 `ZHIPU_API_KEY` + `application-local.yml`（gitignored）注入 |
 | **BaseResponse 反序列化** | 必须保留 `@NoArgsConstructor`，否则 Jackson 无法反序列化 |
 | **用户消息模板不要包含 JSON Schema** | `{outputFormat}` 在 user message 中被替换为 JSON Schema 后，Spring AI 的 StringTemplate4 会把 Schema 中的 `{}` 当模板语法解析崩溃。输出格式约束只能放在 system prompt 中 |
-| **SimpleVectorStore 内存持久化** | 向量在内存中，`@PreDestroy` 时才通过 `VectorStorePersistence` 写入 `data/vector-store.json`。服务被 `taskkill` 强杀时数据丢失 |
 | **ImageIO 读不了 webp** | `javax.imageio.ImageIO` 不支持 webp 格式，`GalleryServiceImpl.upload()` 中的宽高检测对 webp 图片返回 0x0 |
-| **智谱 embedding-2 相似度偏低** | 语义相关内容余弦相似度通常 0.4~0.5，`GalleryRagRetriever.MIN_SCORE` 设 0.4 较为合理，0.65 过严会导致大量漏召回 |
-| **RAG Prompt 写入 ChatMemory** | 当前 RAG 增强后的完整 Prompt 通过 `chatClient.prompt().user()` 传入，会被 `MessageChatMemoryAdvisor` 自动存入记忆。方案设计要求"RAG 上下文只作为本次调用临时 Prompt，不写入 ChatMemory"，当前违反此约束 |
-| **RAG 增强链 Profile 策略** | 5 个 enhance 实现类中，`HybridGalleryRetrieverImpl` 是 `@Profile("postgres")`（依赖 pgvector），其余 4 个是 `@Profile("!test")`。`RagServiceImpl` 通过 `ObjectProvider<T>` 注入所有增强组件，检测到全部就绪时走增强路径，否则走原三层 RAG 降级。测试中需 mock 5 个 ObjectProvider 并设 `@MockitoSettings(strictness = Strictness.LENIENT)` 避免 UnnecessaryStubbing |
-| **GalleryPicture 23 字段 record** | 加字段影响 N 处 `new GalleryPicture(...)` 构造点（Service/Repository/测试）。record 有 compact constructor：`if (storageLocation == null) storageLocation = StorageLocation.MAIN`，旧 JSON 数据无此字段反序列化为 null 后自动兜底 |
+| **智谱 embedding-2 相似度偏低** | 语义相关内容余弦相似度通常 0.4~0.5，`min-score` 设 0.4 较为合理，0.65 过严会导致大量漏召回 |
+| **GalleryPicture 24 字段 record** | 加字段影响 N 处 `new GalleryPicture(...)` 构造点（Service/Repository/测试）。record 有 compact constructor：`if (storageLocation == null) storageLocation = StorageLocation.MAIN`，旧 JSON 数据无此字段反序列化为 null 后自动兜底 |
 | **@EnableScheduling 已启用** | `AiAgentApplication` 已加 `@EnableScheduling`，`GalleryCacheCleanupTask` 通过 `@Scheduled(cron)` 每日清理过期缓存图。test profile 通过 `@Profile("!test")` 排除定时任务，无需额外配置 |
 
 ## 多模态架构
@@ -285,36 +281,45 @@ Advisor 内抛 `BusinessException` → `ExceptionGuardAdvisor`（order=MAX）兜
 
 ```java
 public record ChatRequest(
-    @NotBlank String message,        // 用户消息
-    String chatId,                   // 会话ID
-    Boolean generationMode,          // true=生成模式，false/null=讨论模式
-    String imageBase64,              // 图片base64（与imageUrl互斥）
-    String imageUrl                  // 图片URL（与imageBase64互斥）
+    String message,                      // 用户消息
+    String chatId,                       // 会话ID（不传则自动生成 UUID）
+    Boolean generationMode,              // [兼容旧版] true=生成模式
+    String imageBase64,                  // 图片base64（与imageUrl互斥）
+    String imageUrl,                     // 图片URL（与imageBase64互斥）
+    String mode,                         // chat / image_analysis / image_generation
+    @Size(max=3) List<Long> referencePictureIds, // 显式参考图ID列表
+    Boolean useGalleryRag,               // 启用/禁用图库RAG检索
+    String referenceMode,                // overall/style/color/composition
+    String styleTemplateCode,            // 指定风格模板编码
+    Boolean saveGeneratedToGallery       // 生成图是否保存到图库
 ) {}
 ```
 
-### 双路径分流
+### 三模式分流
 
 ```
-Flag OFF（讨论模式）               Flag ON（生成模式）
-─────────────────                 ─────────────────
-ContentGuard(文本+图片校验)        ContentGuard
-  → MCMA(注入历史消息)               → MCMA(retrieveSize=50)
-  → PromptOptimize(改写userText)     → PromptOptimize
-  → Logging                          → Logging
-  → ExceptionGuard                   → ExceptionGuard
-  → 返回ChatResponseVO               → ImageGenerationService.generate()
-                                      → ChatResponseVO.imageGenerated()
+chat（讨论）                 image_analysis（分析）          image_generation（生成）
+────────────────            ──────────────────────         ─────────────────────────
+autoSave → 入库+原图Media    autoSave → 入库                autoSave → 入库+原图Media
+ContentGuard                 validateImageAnalysis          prepareRagContext(RAG装配+P3图→图)
+  → MCMA(retrieveSize=10)      → visionService.analyze       → MCMA(retrieveSize=50)[存原文]
+  → PromptOptimize             → 返回分析结果                  → RagInjection(15)[注入RAG文本]
+  → Logging                                                  → PromptOptimize
+  → ExceptionGuard                                           → Logging
+  → 返回ChatResponseVO                                       → ExceptionGuard
+                                                             → ImageGenerationService.generate()
+                                                             → ChatResponseVO.imageGenerated()
 ```
 
 ### 图片串联链路
 
 1. 前端 FileReader → base64 → `ChatRequest.imageBase64`
-2. `PictureApp.buildUserSpec()` → `Media(MimeType, ByteArrayResource)` → `ChatClient.user(spec)`
-3. `ContentGuard.validateImages()` 校验数量/大小
-4. `PromptOptimizeAdvisor.enhance()` 不改写 image，只改写 userText
-5. `RedisChatMemory.toRecord()` 从 `UserMessage.getMedia()` 提取 URL → `MessageRecord.mediaUrls`
-6. `RedisChatMemory.toMessage()` 从 `mediaUrls` 重建 `Media` → `new UserMessage(text, mediaList)`
+2. `PictureApp.autoSaveToCacheGallery()` → 图片以 CACHE 位置入库，拿到图库 URL
+3. `PictureApp.buildUserSpec()` → 已入库用 URI(galleryUrl)，未入库用 ByteArrayResource → Media
+4. `ContentGuard.validateImages()` 校验数量/大小
+5. `PromptOptimizeAdvisor.enhance()` 不改写 image，只改写 userText
+6. `RedisChatMemory.toRecord()` → `resolveImageRef(URI)` 匹配图库路径 → `GALLERY:pictureId`；外部图片 → 视觉分析 → `TEXT_DESCRIPTION`
+7. `RedisChatMemory.toMessage()` → GALLERY 从对象存储下载还原 Media；TEXT_DESCRIPTION 拼文字
 
 ### ImageGenerationService 接口
 
@@ -334,8 +339,8 @@ public interface ImageGenerationService {
 | **流式 ExceptionGuard 兜底不生效** | 敏感词等 BusinessException 在流式路径穿透 ExceptionGuard，直达 PictureApp | Spring AI M6 `DefaultAroundAdvisorChain` 的 Micrometer Observation scope 阻断 `.onErrorResume()` 信号 | `PictureApp.doChatStream()` 的 `.onErrorResume()` 区分 BusinessException（透传具体消息）和未知异常（泛化提示） |
 | **关键词过滤仅有字面匹配** | "继续我上一个任务"可绕过黑名单，模型仍生成违规内容 | `ContentGuardAdvisor` 用 `List.of("暴力","色情","政治敏感")` 做字符串匹配，无语义理解 | 暂无，后续需接 DeepSeek 或独立安全模型做语义审核 |
 | **PromptOptimizeAdvisor 无输入时模型幻觉** | 用户发"继续上一个任务"、空描述等无头指令时，DeepSeek 随机猜测主题 | 模型在缺少上下文时自行推测，非记忆污染 | 暂无，后续可在 PromptOptimize 中检测有效需求描述 |
-| **多模态记忆序列化丢失图片引用** | RedisChatMemory 只有 `instanceof String` 分支提取 mediaUrls，但 `Media.getData()` 实际类型是 `URI`（URL传图）或 `ByteArrayResource`（base64传图），两者都不匹配 → mediaUrls 恒为 null；且 `LocalObjectStorageService.getUrl()` 返回 `/api/gallery/files/{id}` 相对路径，`toMessage()` 中 `new URL(relativePath)` 直接抛 MalformedURLException | `RedisChatMemory.java:90` `toRecord()` 的 `filter(m -> m.getData() instanceof String)` 遗漏了 URI 和 ByteArrayResource 两种类型；`LocalObjectStorageService.java:70-76` `getUrl()` 未补全 baseUrl | 图片分析模式走手动 `chatMemory.add()` 只存纯文本，绕开了此 Bug；已通过 ImageRef 分类型存储（GALLERY/TEXT_DESCRIPTION）修复 |
-| **chat_memory_retrieve_size 不生效** | `PictureApp` 中 `.param("chat_memory_retrieve_size", 10/50)` 传参无效，MCMA 每次从 `ChatMemory.get()` 取全部消息全部注入 Prompt，消息越多 token 消耗越大 | Spring AI 1.0.0 GA 的 `MessageChatMemoryAdvisor` Builder 没有 `chatMemoryRetrieveSize()` 方法，类中也不存在 `CHAT_MEMORY_RETRIEVE_SIZE` 常量——该参数在 GA 版本被移除了，MCMA 的 `before()` 方法不对消息列表做截断 | `RedisChatMemory.get()` 内部改用 `LRANGE key (len-N) (len-1)` 只取最后 N 条，从 Redis 网络层截断
+| **多模态记忆序列化丢失图片引用** | RedisChatMemory 只有 `instanceof String` 分支提取 imageRefs，但 `Media.getData()` 实际类型是 `URI`（URL传图）或 `ByteArrayResource`（base64传图），两者都不匹配 → imageRefs 恒为 null；且 `LocalObjectStorageService.getUrl()` 返回 `/api/gallery/files/{id}` 相对路径，`toMessage()` 中 `new URL(relativePath)` 直接抛 MalformedURLException | `RedisChatMemory.java:90` `toRecord()` 的 `filter(m -> m.getData() instanceof String)` 遗漏了 URI 和 ByteArrayResource 两种类型；`LocalObjectStorageService.java:70-76` `getUrl()` 未补全 baseUrl | 图片分析模式走手动 `chatMemory.add()` 只存纯文本，绕开了此 Bug；已通过 ImageRef 分类型存储（GALLERY/TEXT_DESCRIPTION）修复 |
+| **chat_memory_retrieve_size 不生效** | `PictureApp` 中 `.param("chat_memory_retrieve_size", 10/50)` 传参无效，MCMA 每次从 `ChatMemory.get()` 取全部消息全部注入 Prompt，消息越多 token 消耗越大 | Spring AI 1.0.0 GA 的 `MessageChatMemoryAdvisor` Builder 没有 `chatMemoryRetrieveSize()` 方法，类中也不存在 `CHAT_MEMORY_RETRIEVE_SIZE` 常量——该参数在 GA 版本被移除了，MCMA 的 `before()` 方法不对消息列表做截断 | `RedisChatMemory.get()` 内部改用 `LRANGE key (len-N) (len-1)` 只取最后 N 条，从 Redis 网络层截断 |
 
 ## 当前进度
 
@@ -349,19 +354,25 @@ public interface ImageGenerationService {
 - [x] 提示词模板化（PromptTemplate + prompts/*.st）
 - [x] 多模态支持（图片输入 + 生成模式分流 + 前端 toggle）
 - [x] 图片校验（ContentGuard 扩展：数量/大小/格式）
-- [x] ChatMemory 支持 media（MessageRecord.mediaUrls + RedisChatMemory 序列化）
+- [x] ChatMemory 支持 media（MessageRecord.imageRefs + RedisChatMemory 序列化）
 - [x] 图库管理（上传/URL导入/分页/收藏/删除，JSON 文件存储到 gallery-data/）
 - [x] 图片 AI 画像（VisionAnalysis → indexText → SimpleVectorStore 索引）
 - [x] 三层 RAG 增强（显式参考图 → 收藏图检索 → 风格模板兜底）
 - [x] 系统风格模板（10 套预设，关键词匹配，`style-templates.yml`）
 - [x] 前端三栏调试台（图库管理/对话生图/参考调试面板）
 - [x] 向量持久化（SimpleVectorStore + data/vector-store.json）
-- [x] 单元测试 167 个（含 80 个新增 RAG 核心链路测试）
-- [ ] `saveGeneratedToGallery` 实现（生图成功后保存到图库，当前只有 TODO）
-- [ ] `referenceMode` 实际应用（overall/style/color/composition 裁剪参考图字段）
-- [ ] RAG Prompt 不写入 ChatMemory（当前违反设计约束）
+- [x] 单元测试 176 个（2026-06 重构后，已删除 + 新增）
+- [x] 图库哈希去重（SHA-256，上传/URL导入前检查 picHash，重复则返回已有记录）
+- [x] 前端删除按钮（图库卡片 × 按钮 + deletePicture() 确认弹窗）
+- [x] 前端批量上传（input[multiple] + uploadFiles 数组 + 进度提示 + uploading 防重）
+- [x] V6 url/thumbnail_url 改为 TEXT（智谱 CogView 签名 URL 超长，VARCHAR(255) 不够）
+- [x] `saveGeneratedToGallery` 实现（生图成功后保存到图库）
+- [x] `referenceMode` 实际应用（P1: ContextPacker 激活后生效，overall/style/color/composition 裁剪参考图字段）
+- [x] RAG Prompt 不写入 ChatMemory（P0: RagInjectionAdvisor order=15，在 MCMA 之后注入 RAG 文本）
+- [x] Rerank 权重可配置化（P2: 权重提升为 RagProperties 属性，yml 可调 vector/keyword/metadata 权重）
+- [x] Query Rewrite 透传对话历史（P4: RagServiceImpl 注入 ChatMemory，取最近 20 条消息拼接 history 传给 rewrite 服务）
+- [x] 图→图检索支持（P3: 上传参考图 + 空文本时，调视觉模型提取视觉特征作为 RAG 检索 query）
 - [ ] 真实生图 API 接入（DALL·E / SD，接口已预留）
-- [ ] 会话记忆持久化（当前 InMemory，重启丢失）
 - [x] 旧 knowledge/ 模块清理
 - [x] **Spring AI 1.0.0 GA 升级**（M6→GA，BOM 统一依赖管理，Advisor/ChatMemory/ChatClient API 全量迁移）
 - [x] **PostgreSQL 落库**（Flyway V1-V2 迁移脚本，`PostgresGalleryPictureRepository` + `PostgresPictureAiProfileRepository`，`@Profile("postgres")` 切换）
@@ -378,6 +389,7 @@ public interface ImageGenerationService {
 - [x] **生成模式当前图片补发**（`handleGeneration/handleGenerationStream` 原本丢弃当前图片，现通过 `buildGenerationUserSpec()` 将入库后的原图 Media 挂到生成 Prompt 上）
 - [x] **会话窗口消息数限制**（`ChatMemoryProperties.maxConversationMessages` 默认 200，`PictureApp` 入口调用 `ChatHistoryRepository.countByConversation()` 校验，超限抛 BusinessException）
 - [x] **Redis List trim 截断**（`RedisChatMemory.add()` 末尾 `trim(key, -maxMessages, -1)` 确保列表不无限增长）
+- [x] **PostgreSQL 默认化 + 经典 RAG 清理**（2026-06：删除 `GalleryRagRetriever`/`SimpleVectorStore`/`SimpleVectorIndexService`/JSON文件存储/`NoopChatHistoryRepository`/`VectorStorePersistence`；PG 配置合并到 `application.yml`；`@Profile("postgres")` → `@Profile("!test")`；删除 `@Primary`；`RagServiceImpl` 始终走增强检索；`PostgresAutoConfig` 按需导入 DataSource）
 
 ## 测试分类
 
@@ -419,18 +431,14 @@ PromptReferenceAssemblerTest (unit)
   ├── buildDebugInfo() → 空/有参考图/有模板
   └── buildDebugData() → enhancedPrompt/retrieved含id+name/无名回退/无画像无style键/模板字段
 
-RagServiceImplTest (integration, mock三层依赖)
+RagServiceImplTest (integration, mock增强依赖)
   ├── Layer1: 指定IDs→调resolver / 结果入上下文
-  ├── Layer2: useGalleryRag(null/true/false) / 检索结果入上下文 / 空消息跳过
+  ├── Layer2: useGalleryRag(null/true/false) / 增强检索结果入上下文 / 空消息跳过
   ├── Layer3: L1+L2空→触发 / L1有→短路 / L2有→短路 / 显式code→getByCode
   └── Combined: L1+L2同时存在+L3短路 / message=null跳过L2+L3
 
 ExplicitReferenceResolverTest (integration, mock图库+画像)
   └── resolve(): 完整数据 / 无画像→stub / 部分ID不存在→跳过 / GalleryService异常降级
-
-GalleryRagRetrieverTest (integration, mock向量存储+图库+画像)
-  ├── retrieve(): 检索解析 / 无匹配 / null/blank查询 / 多条全部返回 / VectorStore异常降级 / 图库记录缺失
-  └── docId解析: "pic-42"→42 / 非pic-前缀→跳过 / "pic-abc"→跳过
 
 StyleTemplateServiceTest (unit)
   ├── listAll(): 全量5模板

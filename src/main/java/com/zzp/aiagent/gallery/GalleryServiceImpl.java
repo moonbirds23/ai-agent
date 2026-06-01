@@ -21,10 +21,13 @@ import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Collections;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -59,6 +62,15 @@ public class GalleryServiceImpl implements GalleryService {
         ThrowUtils.throwIf(!isImageFormat(decoded.contentType()), ErrorCode.IMAGE_FORMAT_INVALID,
                 "不支持的图片格式: " + decoded.contentType());
 
+        // 哈希去重：相同文件直接返回已有记录
+        String picHash = sha256(decoded.bytes());
+        List<GalleryPicture> existing = repository.findByHash(picHash);
+        if (!existing.isEmpty()) {
+            log.info("[GalleryService] 重复图片跳过上传，返回已有记录 id={} hash={}",
+                    existing.get(0).id(), picHash);
+            return existing.get(0);
+        }
+
         // Create the picture record first (without id) to get dimensions
         ImageMeta meta = readImageMeta(decoded.bytes(), decoded.contentType());
         String ext = extFromContentType(decoded.contentType());
@@ -86,7 +98,8 @@ public class GalleryServiceImpl implements GalleryService {
                 request.favorited() != null ? request.favorited() : false,
                 LocalDateTime.now(),
                 LocalDateTime.now(),
-                storageLocation
+                storageLocation,
+                picHash
         );
 
         GalleryPicture saved = repository.save(picture);
@@ -105,7 +118,8 @@ public class GalleryServiceImpl implements GalleryService {
                 saved.spaceId(), saved.reviewStatus(), saved.picColor(),
                 saved.sourceType(), saved.favorited(),
                 saved.createTime(), saved.updateTime(),
-                saved.storageLocation()
+                saved.storageLocation(),
+                saved.picHash()
         );
         repository.save(withUrl);
 
@@ -123,6 +137,15 @@ public class GalleryServiceImpl implements GalleryService {
                 ErrorCode.PARAMS_ERROR, "图片名称不能为空");
 
         DownloadedImage downloaded = imageDownloadService.download(request.imageUrl());
+
+        // 哈希去重
+        String picHash = sha256(downloaded.bytes());
+        List<GalleryPicture> existing = repository.findByHash(picHash);
+        if (!existing.isEmpty()) {
+            log.info("[GalleryService] 重复图片跳过导入，返回已有记录 id={} hash={}",
+                    existing.get(0).id(), picHash);
+            return existing.get(0);
+        }
 
         ImageMeta meta = readImageMeta(downloaded.bytes(), downloaded.contentType());
         String ext = extFromContentType(downloaded.contentType());
@@ -148,7 +171,8 @@ public class GalleryServiceImpl implements GalleryService {
                 false,
                 LocalDateTime.now(),
                 LocalDateTime.now(),
-                StorageLocation.MAIN
+                StorageLocation.MAIN,
+                picHash
         );
 
         GalleryPicture saved = repository.save(picture);
@@ -165,7 +189,8 @@ public class GalleryServiceImpl implements GalleryService {
                 saved.spaceId(), saved.reviewStatus(), saved.picColor(),
                 saved.sourceType(), saved.favorited(),
                 saved.createTime(), saved.updateTime(),
-                saved.storageLocation()
+                saved.storageLocation(),
+                saved.picHash()
         );
         repository.save(withUrl);
 
@@ -244,7 +269,8 @@ public class GalleryServiceImpl implements GalleryService {
                 existing.spaceId(), existing.reviewStatus(), existing.picColor(),
                 existing.sourceType(), favorited,
                 existing.createTime(), LocalDateTime.now(),
-                existing.storageLocation()
+                existing.storageLocation(),
+                existing.picHash()
         );
         return repository.save(updated);
     }
@@ -353,5 +379,14 @@ public class GalleryServiceImpl implements GalleryService {
             case "image/bmp" -> "bmp";
             default -> "png";
         };
+    }
+
+    private static String sha256(byte[] bytes) {
+        try {
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            return HexFormat.of().formatHex(md.digest(bytes));
+        } catch (NoSuchAlgorithmException e) {
+            throw new RuntimeException("SHA-256 algorithm not available", e);
+        }
     }
 }

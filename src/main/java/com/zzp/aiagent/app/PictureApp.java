@@ -5,6 +5,7 @@ import com.zzp.aiagent.advisor.ContentGuardAdvisor;
 import com.zzp.aiagent.advisor.ExceptionGuardAdvisor;
 import com.zzp.aiagent.advisor.LoggingAdvisor;
 import com.zzp.aiagent.advisor.PromptOptimizeAdvisor;
+import com.zzp.aiagent.advisor.RagInjectionAdvisor;
 import com.zzp.aiagent.common.PromptTemplate;
 import com.zzp.aiagent.common.ThrowUtils;
 import com.zzp.aiagent.exception.BusinessException;
@@ -95,6 +96,7 @@ public class PictureApp {
                 .defaultAdvisors(
                         new ContentGuardAdvisor(),
                         MessageChatMemoryAdvisor.builder(chatMemory).build(),
+                        new RagInjectionAdvisor(),
                         new PromptOptimizeAdvisor(promptTemplate),
                         new LoggingAdvisor(),
                         new ExceptionGuardAdvisor()
@@ -143,16 +145,78 @@ public class PictureApp {
 
     // ── RAG 共同逻辑 ──────────────────────────────────────────────
 
-    private record RagPrepared(String augmentedMsg, Object debugData) {}
+    private record RagPrepared(String originalMsg, String augmentedMsg, Object debugData) {
+    }
 
     private RagPrepared prepareRagContext(ChatRequest request, String chatId, String logTag) {
         String msg = request.message() != null && !request.message().isBlank()
                 ? request.message()
                 : "基于以上对话内容，请生成最终的图片生成参数";
-        RagContext ragCtx = ragService.buildContext(request);
+
+        // P3: 图→图检索 — 当有图片但无文本消息时，用视觉分析结果作为 RAG 检索 query
+        ChatRequest ragRequest = request;
+        boolean useImageForSearch = hasImage(request)
+                && (request.message() == null || request.message().isBlank());
+        if (useImageForSearch) {
+            try {
+                VisionAnalysisResult vision = visionAnalysisService.analyze(
+                        "请提取可用于图库检索的视觉特征（主体、风格、色彩、构图）",
+                        request.imageBase64(), request.imageUrl());
+                String visionQuery = buildImageSearchQuery(vision);
+                log.info("[{}] 从参考图片提取检索词 chatId={}: {}", logTag, chatId, visionQuery);
+                ragRequest = requestWithMessage(request, visionQuery);
+                // 同时更新 msg 用于生图 Prompt
+                msg = "基于上传的参考图片风格，请生成最终的图片生成参数";
+            } catch (Exception e) {
+                log.warn("[{}] 图片视觉分析失败，使用默认检索 chatId={}: {}", logTag, chatId, e.getMessage());
+            }
+        }
+
+        RagContext ragCtx = ragService.buildContext(ragRequest);
         log.info("[{}] 上下文构建完成 chatId={}:\n{}", logTag, chatId, assembler.buildDebugInfo(ragCtx));
         String augmentedMsg = assembler.assemble(msg, ragCtx);
-        return new RagPrepared(augmentedMsg, assembler.buildDebugData(ragCtx, augmentedMsg));
+        return new RagPrepared(msg, augmentedMsg, assembler.buildDebugData(ragCtx, augmentedMsg));
+    }
+
+    // ── 图→图检索辅助 ──────────────────────────────────────────────
+
+    /**
+     * P3: 从视觉分析结果中提取图库检索用文本。
+     * 拼接主体、风格、色彩、构图等可检索属性。
+     */
+    private String buildImageSearchQuery(VisionAnalysisResult vision) {
+        StringBuilder sb = new StringBuilder();
+        appendIfNotEmpty(sb, vision.subject());
+        appendIfNotEmpty(sb, vision.style());
+        appendIfNotEmpty(sb, vision.colors());
+        appendIfNotEmpty(sb, vision.composition());
+        return !sb.isEmpty() ? sb.toString() : "分析图片";
+    }
+
+    private static void appendIfNotEmpty(StringBuilder sb, String value) {
+        if (value != null && !value.isBlank()) {
+            if (!sb.isEmpty()) sb.append(" ");
+            sb.append(value);
+        }
+    }
+
+    /**
+     * P3: 创建替换了 message 字段的 ChatRequest 副本，用于 RAG 检索。
+     */
+    private ChatRequest requestWithMessage(ChatRequest src, String newMessage) {
+        return new ChatRequest(
+                newMessage,
+                src.chatId(),
+                src.generationMode(),
+                src.imageBase64(),
+                src.imageUrl(),
+                src.mode(),
+                src.referencePictureIds(),
+                src.useGalleryRag(),
+                src.referenceMode(),
+                src.styleTemplateCode(),
+                src.saveGeneratedToGallery()
+        );
     }
 
     // ── 生成模式 ──────────────────────────────────────────────────
@@ -162,11 +226,12 @@ public class PictureApp {
         RagPrepared rag = prepareRagContext(request, chatId, "RAG");
 
         ImageAgentResponse aiResp = chatClient.prompt()
-                .user(spec -> buildGenerationUserSpec(spec, rag.augmentedMsg, saved))
+                .user(spec -> buildGenerationUserSpec(spec, rag.originalMsg, saved))
                 .advisors(spec -> spec
                         .param(ChatMemory.CONVERSATION_ID, chatId)
                         .param("chat_memory_retrieve_size", 50)
-                        .param("chatId", chatId))
+                        .param("chatId", chatId)
+                        .param(RagInjectionAdvisor.KEY_RAG_AUGMENTED, rag.augmentedMsg))
                 .call()
                 .entity(outputConverter);
 
@@ -273,7 +338,7 @@ public class PictureApp {
 
         Flux<StreamEventVO> generateEvent = Flux.defer(() -> {
             ImageAgentResponse aiResp = chatClient.prompt()
-                    .user(spec -> buildGenerationUserSpec(spec, rag.augmentedMsg, saved))
+                    .user(spec -> buildGenerationUserSpec(spec, rag.originalMsg, saved))
                     .advisors(spec -> spec
                             .param(ChatMemory.CONVERSATION_ID, chatId)
                             .param("chat_memory_retrieve_size", 50)

@@ -15,7 +15,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 @Component
-@Profile("postgres")
+@Profile("!test")
 @Slf4j
 public class HybridGalleryRetrieverImpl implements HybridGalleryRetriever {
 

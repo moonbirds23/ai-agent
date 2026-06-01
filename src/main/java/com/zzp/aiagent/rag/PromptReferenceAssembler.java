@@ -3,6 +3,7 @@ package com.zzp.aiagent.rag;
 import com.zzp.aiagent.common.PromptTemplate;
 import com.zzp.aiagent.gallery.model.GalleryPicture;
 import com.zzp.aiagent.profile.model.PictureAiProfile;
+import com.zzp.aiagent.rag.enhance.PackedRagContext;
 import com.zzp.aiagent.rag.model.RagContext;
 import com.zzp.aiagent.template.model.StyleTemplate;
 import lombok.AllArgsConstructor;
@@ -37,9 +38,17 @@ public class PromptReferenceAssembler {
             return userInput;
         }
 
-        String explicitRefs = formatExplicitReferences(context);
-        String retrievedRefs = formatRetrievedReferences(context);
-        String styleTemplate = formatStyleTemplate(context.getStyleTemplate());
+        String explicitRefs, retrievedRefs, styleTemplate;
+        PackedRagContext packed = context.getPackedContext();
+        if (packed != null) {
+            explicitRefs = packed.explicitReferencesText();
+            retrievedRefs = packed.retrievedReferencesText();
+            styleTemplate = packed.styleTemplateText();
+        } else {
+            explicitRefs = formatExplicitReferences(context);
+            retrievedRefs = formatRetrievedReferences(context);
+            styleTemplate = formatStyleTemplate(context.getStyleTemplate());
+        }
 
         return promptTemplate.render("default", "generation_with_rag",
                 "userInput", userInput,

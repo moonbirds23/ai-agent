@@ -24,7 +24,8 @@ public record GalleryPicture(
         Boolean favorited,
         LocalDateTime createTime,
         LocalDateTime updateTime,
-        String storageLocation
+        String storageLocation,
+        String picHash
 ) {
     public GalleryPicture {
         if (storageLocation == null) storageLocation = StorageLocation.MAIN;

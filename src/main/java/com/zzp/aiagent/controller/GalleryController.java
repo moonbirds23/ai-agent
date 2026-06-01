@@ -92,9 +92,11 @@ public class GalleryController {
         String ext = picture.picFormat() != null ? picture.picFormat() : "png";
 
         byte[] bytes = null;
+        // storage key 格式: gallery/{userId}/{pictureId}/origin.{ext}（与 GalleryServiceImpl.upload 一致）
         for (String tryExt : List.of(ext, "png", "jpg", "jpeg", "webp", "gif", "bmp")) {
             try {
-                bytes = storageService.download(pictureId + "." + tryExt);
+                String key = "gallery/" + picture.userId() + "/" + pictureId + "/origin." + tryExt;
+                bytes = storageService.download(key);
                 ext = tryExt;
                 break;
             } catch (Exception ignored) {
