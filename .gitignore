@@ -37,3 +37,8 @@ application-local.yml
 
 ### Gallery data ###
 gallery-data/
+
+### Personal docs & notes ###
+docs/
+mianshiTest.md
+project-note/
