@@ -1,6 +1,6 @@
 package com.zzp.aiagent.advisor;
 
-import com.zzp.aiagent.common.PromptTemplate;
+import com.zzp.aiagent.utils.PromptTemplate;
 import com.zzp.aiagent.exception.BusinessException;
 import com.zzp.aiagent.exception.ErrorCode;
 import org.junit.jupiter.api.BeforeEach;

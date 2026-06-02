@@ -2,8 +2,8 @@ package com.zzp.aiagent.controller;
 
 import com.zzp.aiagent.common.BaseResponse;
 import com.zzp.aiagent.common.ResultUtils;
-import com.zzp.aiagent.profile.PictureAiProfileService;
-import com.zzp.aiagent.profile.model.PictureAiProfile;
+import com.zzp.aiagent.service.PictureAiProfileService;
+import com.zzp.aiagent.model.entity.PictureAiProfile;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Profile;

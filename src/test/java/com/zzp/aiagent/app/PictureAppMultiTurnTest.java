@@ -1,14 +1,15 @@
 package com.zzp.aiagent.app;
 
-import com.zzp.aiagent.common.PromptTemplate;
-import com.zzp.aiagent.image.ImageGenerationService;
-import com.zzp.aiagent.image.VisionAnalysisService;
-import com.zzp.aiagent.gallery.GalleryProperties;
-import com.zzp.aiagent.gallery.GalleryService;
-import com.zzp.aiagent.memory.ChatHistoryRepository;
+import com.zzp.aiagent.utils.PromptTemplate;
+import com.zzp.aiagent.service.ImageGenerationService;
+import com.zzp.aiagent.service.VisionAnalysisService;
+import com.zzp.aiagent.domain.gallery.GalleryProperties;
+import com.zzp.aiagent.service.GalleryService;
+import com.zzp.aiagent.repository.ChatHistoryRepository;
 import com.zzp.aiagent.memory.ChatMemoryProperties;
-import com.zzp.aiagent.rag.PromptReferenceAssembler;
-import com.zzp.aiagent.rag.RagService;
+import com.zzp.aiagent.service.impl.ChatServiceImpl;
+import com.zzp.aiagent.service.impl.PromptReferenceAssembler;
+import com.zzp.aiagent.service.RagService;
 import com.zzp.aiagent.model.dto.chat.ChatRequest;
 import com.zzp.aiagent.model.vo.ChatResponseVO;
 import org.junit.jupiter.api.BeforeEach;
@@ -47,20 +48,20 @@ import static org.mockito.Mockito.when;
 class PictureAppMultiTurnTest {
 
     private ChatModel chatModel;
-    private PictureApp pictureApp;
+    private ChatServiceImpl chatService;
 
     @BeforeEach
     void setUp() {
         chatModel = mock(ChatModel.class);
         RagService ragService = mock(RagService.class);
-        when(ragService.buildContext(any())).thenReturn(com.zzp.aiagent.rag.model.RagContext.empty());
+        when(ragService.buildContext(any())).thenReturn(com.zzp.aiagent.domain.rag.RagContext.empty());
         PromptReferenceAssembler assembler = mock(PromptReferenceAssembler.class);
         when(assembler.assemble(any(), any())).thenAnswer(inv -> inv.getArgument(0));
         GalleryService galleryService = mock(GalleryService.class);
         ChatHistoryRepository chatHistoryRepo = mock(ChatHistoryRepository.class);
         ChatMemoryProperties chatMemoryProps = new ChatMemoryProperties(50, 7, 200);
         GalleryProperties galleryProps = new GalleryProperties(7, "0 0 3 * * ?");
-        pictureApp = new PictureApp(chatModel, MessageWindowChatMemory.builder()
+        chatService = new ChatServiceImpl(chatModel, MessageWindowChatMemory.builder()
                 .chatMemoryRepository(new InMemoryChatMemoryRepository())
                 .maxMessages(100)
                 .build(), new PromptTemplate(),
@@ -98,17 +99,17 @@ class PictureAppMultiTurnTest {
                     ));
                 });
 
-        ChatResponseVO reply1 = pictureApp.doChat(req("我想要一张雪景图片"), "chat-001");
+        ChatResponseVO reply1 = chatService.chat(req("我想要一张雪景图片"), "chat-001");
         assertThat(reply1.type()).isEqualTo("chat");
         assertThat(reply1.message()).isNotBlank();
         System.out.println("[第1轮] " + reply1.message());
 
-        ChatResponseVO reply2 = pictureApp.doChat(req("加一个小孩在堆雪人"), "chat-001");
+        ChatResponseVO reply2 = chatService.chat(req("加一个小孩在堆雪人"), "chat-001");
         assertThat(reply2.type()).isEqualTo("chat");
         assertThat(reply2.message()).isNotBlank();
         System.out.println("[第2轮] " + reply2.message());
 
-        ChatResponseVO reply3 = pictureApp.doChat(req("再加一条金毛犬"), "chat-001");
+        ChatResponseVO reply3 = chatService.chat(req("再加一条金毛犬"), "chat-001");
         assertThat(reply3.type()).isEqualTo("chat");
         assertThat(reply3.message()).isNotBlank();
         System.out.println("[第3轮] " + reply3.message());
@@ -128,15 +129,15 @@ class PictureAppMultiTurnTest {
                         new Generation(new AssistantMessage(jsonResponse("chat", "收到，正在为您生成")))
                 )));
 
-        ChatResponseVO replyA = pictureApp.doChat(req("我想要一张海边日落图"), "chat-A");
+        ChatResponseVO replyA = chatService.chat(req("我想要一张海边日落图"), "chat-A");
         System.out.println("[会话A] " + replyA.message());
         assertThat(replyA.message()).isNotBlank();
 
-        ChatResponseVO replyB = pictureApp.doChat(req("我想要一张森林清晨图"), "chat-B");
+        ChatResponseVO replyB = chatService.chat(req("我想要一张森林清晨图"), "chat-B");
         System.out.println("[会话B] " + replyB.message());
         assertThat(replyB.message()).isNotBlank();
 
-        ChatResponseVO replyA2 = pictureApp.doChat(req("把日落改成日出"), "chat-A");
+        ChatResponseVO replyA2 = chatService.chat(req("把日落改成日出"), "chat-A");
         System.out.println("[会话A-第2轮] " + replyA2.message());
         assertThat(replyA2.message()).isNotBlank();
     }

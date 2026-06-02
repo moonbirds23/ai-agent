@@ -1,6 +1,6 @@
 package com.zzp.aiagent.controller;
 
-import com.zzp.aiagent.image.ImageDownloadService;
+import com.zzp.aiagent.service.ImageDownloadService;
 import com.zzp.aiagent.model.dto.image.DownloadedImage;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;

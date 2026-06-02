@@ -2,15 +2,14 @@ package com.zzp.aiagent.controller;
 
 import com.zzp.aiagent.common.BaseResponse;
 import com.zzp.aiagent.common.ResultUtils;
-import com.zzp.aiagent.exception.ErrorCode;
-import com.zzp.aiagent.gallery.GalleryService;
-import com.zzp.aiagent.gallery.model.GalleryImportUrlRequest;
-import com.zzp.aiagent.gallery.model.GalleryPicture;
-import com.zzp.aiagent.gallery.model.GalleryQueryRequest;
-import com.zzp.aiagent.gallery.model.GalleryUploadRequest;
-import com.zzp.aiagent.storage.ObjectStorageService;
+import com.zzp.aiagent.service.GalleryService;
+import com.zzp.aiagent.domain.gallery.GalleryImportUrlRequest;
+import com.zzp.aiagent.model.entity.GalleryPicture;
+import com.zzp.aiagent.domain.gallery.GalleryQueryRequest;
+import com.zzp.aiagent.domain.gallery.GalleryUploadRequest;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import java.util.List;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Profile;
@@ -25,8 +24,6 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.util.List;
-
 @Profile("!test")
 @RestController
 @RequestMapping("/gallery")
@@ -36,7 +33,6 @@ import java.util.List;
 public class GalleryController {
 
     private final GalleryService galleryService;
-    private final ObjectStorageService storageService;
 
     @PostMapping("/upload")
     @Operation(summary = "上传图片(Base64)", description = "上传Base64编码的图片到图库")
@@ -89,34 +85,13 @@ public class GalleryController {
     @Operation(summary = "获取图片文件", description = "根据图片ID返回图片文件二进制数据")
     public ResponseEntity<byte[]> serveFile(@PathVariable Long pictureId) {
         GalleryPicture picture = galleryService.getById(pictureId);
+        byte[] bytes = galleryService.downloadPicture(pictureId);
         String ext = picture.picFormat() != null ? picture.picFormat() : "png";
-
-        byte[] bytes = null;
-        // storage key 格式: gallery/{userId}/{pictureId}/origin.{ext}（与 GalleryServiceImpl.upload 一致）
-        for (String tryExt : List.of(ext, "png", "jpg", "jpeg", "webp", "gif", "bmp")) {
-            try {
-                String key = "gallery/" + picture.userId() + "/" + pictureId + "/origin." + tryExt;
-                bytes = storageService.download(key);
-                ext = tryExt;
-                break;
-            } catch (Exception ignored) {
-            }
-        }
-
-        if (bytes == null) {
-            log.error("[GalleryController] 图片文件不存在 pictureId={}", pictureId);
-            throw new com.zzp.aiagent.exception.BusinessException(ErrorCode.GALLERY_OPERATION_FAILED, "图片文件不存在");
-        }
-
-        MediaType mediaType = mediaTypeForExt(ext);
-        return ResponseEntity.ok().contentType(mediaType).body(bytes);
-    }
-
-    private MediaType mediaTypeForExt(String ext) {
-        return switch (ext.toLowerCase()) {
+        MediaType mediaType = switch (ext.toLowerCase()) {
             case "jpg", "jpeg" -> MediaType.IMAGE_JPEG;
             case "gif" -> MediaType.IMAGE_GIF;
             default -> MediaType.IMAGE_PNG;
         };
+        return ResponseEntity.ok().contentType(mediaType).body(bytes);
     }
 }

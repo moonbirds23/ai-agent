@@ -1,10 +1,13 @@
 package com.zzp.aiagent.rag;
 
-import com.zzp.aiagent.common.PromptTemplate;
-import com.zzp.aiagent.gallery.model.GalleryPicture;
-import com.zzp.aiagent.profile.model.PictureAiProfile;
-import com.zzp.aiagent.rag.model.RagContext;
-import com.zzp.aiagent.template.model.StyleTemplate;
+import com.zzp.aiagent.utils.PromptTemplate;
+import com.zzp.aiagent.model.entity.GalleryPicture;
+import com.zzp.aiagent.model.entity.PictureAiProfile;
+import com.zzp.aiagent.domain.rag.PackedRagContext;
+import com.zzp.aiagent.service.RagContextPacker;
+import com.zzp.aiagent.service.impl.PromptReferenceAssembler;
+import com.zzp.aiagent.domain.rag.RagContext;
+import com.zzp.aiagent.domain.template.StyleTemplate;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -16,6 +19,11 @@ import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 /**
  * <h3>测试目的</h3>
@@ -32,13 +40,21 @@ import static org.assertj.core.api.Assertions.assertThat;
 class PromptReferenceAssemblerTest {
 
     private PromptReferenceAssembler assembler;
+    private RagContextPacker packer;
     private GalleryPicture samplePic;
     private PictureAiProfile sampleProfile;
     private StyleTemplate sampleTemplate;
 
     @BeforeEach
     void setUp() {
-        assembler = new PromptReferenceAssembler(new PromptTemplate());
+        packer = mock(RagContextPacker.class);
+        assembler = new PromptReferenceAssembler(new PromptTemplate(), packer);
+
+        // Default lenient stub: returns empty context for any call.
+        // Individual tests that need specific content override with their own when().thenReturn().
+        lenient().when(packer.pack(any(), any())).thenReturn(
+                new PackedRagContext("（无参考图）", "（无参考图）", "（无匹配风格模板）", 0)
+        );
 
         samplePic = new GalleryPicture(
                 1L, "http://example.com/pic1.jpg", null, "BIGBANG Q版合影", "团体合影",
@@ -83,6 +99,13 @@ class PromptReferenceAssemblerTest {
         @Test
         @DisplayName("仅 explicit 参考图 → 增强 Prompt 含参考图名称和画像")
         void explicitOnly_includesPictureDetails() {
+            when(packer.pack(any(), isNull())).thenReturn(new PackedRagContext(
+                    "参考图1：\n  - 名称：BIGBANG Q版合影\n  - 风格：卡通/Q版风格\n",
+                    "（无参考图）",
+                    "（无匹配风格模板）",
+                    100
+            ));
+
             RagContext ctx = RagContext.empty()
                     .addExplicit(new RagContext.ReferencePicture(samplePic, sampleProfile));
 
@@ -100,6 +123,13 @@ class PromptReferenceAssemblerTest {
         @Test
         @DisplayName("仅 retrieved 参考图 → 增强 Prompt 含检索图信息")
         void retrievedOnly_includesRetrievedDetails() {
+            when(packer.pack(any(), isNull())).thenReturn(new PackedRagContext(
+                    "（无参考图）",
+                    "参考图1：\n  - 名称：BIGBANG Q版合影\n  - 风格：卡通/Q版风格\n",
+                    "（无匹配风格模板）",
+                    100
+            ));
+
             RagContext ctx = RagContext.empty()
                     .addRetrieved(new RagContext.ReferencePicture(samplePic, sampleProfile));
 
@@ -115,6 +145,13 @@ class PromptReferenceAssemblerTest {
         @Test
         @DisplayName("仅风格模板 → 增强 Prompt 含模板 name/code/prompt")
         void templateOnly_includesTemplateDetails() {
+            when(packer.pack(any(), isNull())).thenReturn(new PackedRagContext(
+                    "（无参考图）",
+                    "（无参考图）",
+                    "模板名称：儿童绘本插画\n模板编码：children-illustration\n正面提示词：柔和温暖风格\n",
+                    80
+            ));
+
             RagContext ctx = RagContext.empty().withTemplate(sampleTemplate);
 
             String result = assembler.assemble("儿童插画", ctx);
@@ -131,6 +168,13 @@ class PromptReferenceAssemblerTest {
         @Test
         @DisplayName("三层全有 → 增强 Prompt 含全部三层信息")
         void allThreeLayers_allIncluded() {
+            when(packer.pack(any(), isNull())).thenReturn(new PackedRagContext(
+                    "参考图1：\n  - 名称：BIGBANG Q版合影\n  - 风格：卡通/Q版风格\n",
+                    "参考图1：\n  - 名称：BIGBANG Q版合影\n",
+                    "模板名称：儿童绘本插画\n模板编码：children-illustration\n正面提示词：柔和温暖风格\n",
+                    150
+            ));
+
             RagContext ctx = RagContext.empty()
                     .addExplicit(new RagContext.ReferencePicture(samplePic, sampleProfile))
                     .addRetrieved(new RagContext.ReferencePicture(samplePic, null))
@@ -149,7 +193,7 @@ class PromptReferenceAssemblerTest {
          * 目的：无画像的参考图也能正常格式化，不抛异常。
          */
         @Test
-        @DisplayName("参考图无画像 → 不抛异常，显示'未分析'")
+        @DisplayName("参考图无画像 → 不抛异常")
         void noProfile_noException() {
             RagContext ctx = RagContext.empty()
                     .addExplicit(new RagContext.ReferencePicture(samplePic, null));

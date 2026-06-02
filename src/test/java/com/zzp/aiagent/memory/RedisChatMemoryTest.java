@@ -3,6 +3,8 @@ package com.zzp.aiagent.memory;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zzp.aiagent.model.dto.memory.ImageRef;
 import com.zzp.aiagent.model.dto.memory.MessageRecord;
+import com.zzp.aiagent.manager.RedisChatMemory;
+import com.zzp.aiagent.repository.ChatHistoryRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -250,8 +252,8 @@ class RedisChatMemoryTest {
     @DisplayName("add → gallery URL → 存 GALLERY ref")
     void add_galleryUrl_storesGalleryRef() throws Exception {
         // 构造 ObjectProvider 返回 mock GalleryService
-        var galleryService = mock(com.zzp.aiagent.gallery.GalleryService.class);
-        when(galleryService.getById(42L)).thenReturn(new com.zzp.aiagent.gallery.model.GalleryPicture(
+        var galleryService = mock(com.zzp.aiagent.service.GalleryService.class);
+        when(galleryService.getById(42L)).thenReturn(new com.zzp.aiagent.model.entity.GalleryPicture(
                 42L, "/api/gallery/files/42", null, "测试图", null, null, null, null, null, null,
                 null, null, 1L, 0L, 1, null, "upload", false, null, null, "MAIN", null));
 

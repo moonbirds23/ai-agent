@@ -1,9 +1,9 @@
 package com.zzp.aiagent.rag;
 
-import com.zzp.aiagent.gallery.model.GalleryPicture;
-import com.zzp.aiagent.profile.model.PictureAiProfile;
-import com.zzp.aiagent.rag.model.RagContext;
-import com.zzp.aiagent.template.model.StyleTemplate;
+import com.zzp.aiagent.model.entity.GalleryPicture;
+import com.zzp.aiagent.model.entity.PictureAiProfile;
+import com.zzp.aiagent.domain.rag.RagContext;
+import com.zzp.aiagent.domain.template.StyleTemplate;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;

@@ -1,6 +1,9 @@
 package com.zzp.aiagent.template;
 
-import com.zzp.aiagent.template.model.StyleTemplate;
+import com.zzp.aiagent.domain.template.StyleTemplate;
+import com.zzp.aiagent.domain.template.StyleTemplateProperties;
+import com.zzp.aiagent.service.StyleTemplateService;
+import com.zzp.aiagent.service.impl.StyleTemplateServiceImpl;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;

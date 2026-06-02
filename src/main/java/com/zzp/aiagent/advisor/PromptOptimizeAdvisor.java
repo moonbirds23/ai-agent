@@ -1,6 +1,6 @@
 package com.zzp.aiagent.advisor;
 
-import com.zzp.aiagent.common.PromptTemplate;
+import com.zzp.aiagent.utils.PromptTemplate;
 import org.springframework.ai.chat.client.ChatClientRequest;
 import org.springframework.ai.chat.client.ChatClientResponse;
 import org.springframework.ai.chat.client.advisor.api.CallAdvisor;

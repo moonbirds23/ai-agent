@@ -2,6 +2,7 @@ package com.zzp.aiagent.app;
 
 import com.zzp.aiagent.model.dto.chat.ChatRequest;
 import com.zzp.aiagent.model.vo.ChatResponseVO;
+import com.zzp.aiagent.service.ChatService;
 import jakarta.annotation.Resource;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Disabled;
@@ -38,7 +39,7 @@ import java.util.UUID;
 class AppTest {
 
     @Resource
-    private PictureApp pictureApp;
+    private ChatService chatService;
 
     /**
      * 目的：端到端验证多轮对话的上下文记忆。
@@ -51,21 +52,21 @@ class AppTest {
         String chatId = UUID.randomUUID().toString();
         // 第一轮：告知个人信息
         String message = "你好，我是程序员";
-        ChatResponseVO answer = pictureApp.doChat(new ChatRequest(message, chatId, null, null, null), chatId);
+        ChatResponseVO answer = chatService.chat(new ChatRequest(message, chatId, null, null, null), chatId);
         Assertions.assertNotNull(answer);
         Assertions.assertNotNull(answer.message());
         System.out.println("[第1轮] type=" + answer.type() + " message=" + answer.message());
 
         // 第二轮：补充信息
         message = "我想让另一半（ACD）更爱我";
-        answer = pictureApp.doChat(new ChatRequest(message, chatId, null, null, null), chatId);
+        answer = chatService.chat(new ChatRequest(message, chatId, null, null, null), chatId);
         Assertions.assertNotNull(answer);
         Assertions.assertNotNull(answer.message());
         System.out.println("[第2轮] type=" + answer.type() + " message=" + answer.message());
 
         // 第三轮：验证记忆——能否回忆起第 1 轮的内容
         message = "我的另一半叫什么来着？刚跟你说过，帮我回忆一下";
-        answer = pictureApp.doChat(new ChatRequest(message, chatId, null, null, null), chatId);
+        answer = chatService.chat(new ChatRequest(message, chatId, null, null, null), chatId);
         Assertions.assertNotNull(answer);
         Assertions.assertNotNull(answer.message());
         System.out.println("[第3轮] type=" + answer.type() + " message=" + answer.message());

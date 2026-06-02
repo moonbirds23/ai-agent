@@ -1,16 +1,17 @@
 package com.zzp.aiagent.app;
 
-import com.zzp.aiagent.common.PromptTemplate;
+import com.zzp.aiagent.utils.PromptTemplate;
 import com.zzp.aiagent.exception.BusinessException;
 import com.zzp.aiagent.exception.ErrorCode;
-import com.zzp.aiagent.image.ImageGenerationService;
-import com.zzp.aiagent.image.VisionAnalysisService;
-import com.zzp.aiagent.gallery.GalleryProperties;
-import com.zzp.aiagent.gallery.GalleryService;
-import com.zzp.aiagent.memory.ChatHistoryRepository;
+import com.zzp.aiagent.service.ImageGenerationService;
+import com.zzp.aiagent.service.VisionAnalysisService;
+import com.zzp.aiagent.domain.gallery.GalleryProperties;
+import com.zzp.aiagent.service.GalleryService;
+import com.zzp.aiagent.repository.ChatHistoryRepository;
 import com.zzp.aiagent.memory.ChatMemoryProperties;
-import com.zzp.aiagent.rag.PromptReferenceAssembler;
-import com.zzp.aiagent.rag.RagService;
+import com.zzp.aiagent.service.impl.ChatServiceImpl;
+import com.zzp.aiagent.service.impl.PromptReferenceAssembler;
+import com.zzp.aiagent.service.RagService;
 import com.zzp.aiagent.model.dto.chat.ChatRequest;
 import com.zzp.aiagent.model.dto.image.ImageGenerationResult;
 import com.zzp.aiagent.model.dto.image.VisionAnalysisResult;
@@ -63,7 +64,7 @@ class PictureAppMultimodalTest {
     private ChatHistoryRepository chatHistoryRepo;
     private ChatMemoryProperties chatMemoryProps;
     private GalleryProperties galleryProps;
-    private PictureApp pictureApp;
+    private ChatServiceImpl chatService;
 
     @BeforeEach
     void setUp() {
@@ -76,9 +77,9 @@ class PictureAppMultimodalTest {
         chatHistoryRepo = mock(ChatHistoryRepository.class);
         chatMemoryProps = new ChatMemoryProperties(50, 7, 200);
         galleryProps = new GalleryProperties(7, "0 0 3 * * ?");
-        when(ragService.buildContext(any())).thenReturn(com.zzp.aiagent.rag.model.RagContext.empty());
+        when(ragService.buildContext(any())).thenReturn(com.zzp.aiagent.domain.rag.RagContext.empty());
         when(assembler.assemble(any(), any())).thenAnswer(inv -> inv.getArgument(0));
-        pictureApp = new PictureApp(chatModel, MessageWindowChatMemory.builder()
+        chatService = new ChatServiceImpl(chatModel, MessageWindowChatMemory.builder()
                 .chatMemoryRepository(new InMemoryChatMemoryRepository())
                 .maxMessages(100)
                 .build(), new PromptTemplate(),
@@ -125,7 +126,7 @@ class PictureAppMultimodalTest {
         String b64 = Base64.getEncoder().encodeToString(tinyPng);
         ChatRequest req = new ChatRequest("帮我把这张图改成水墨风", null, false, b64, null);
 
-        ChatResponseVO vo = pictureApp.doChat(req, "chat-img-1");
+        ChatResponseVO vo = chatService.chat(req, "chat-img-1");
 
         assertThat(vo).isNotNull();
         assertThat(vo.type()).isEqualTo("chat");
@@ -152,7 +153,7 @@ class PictureAppMultimodalTest {
         ChatRequest req = new ChatRequest("分析这张图", null, false, null,
                 "https://example.com/test.png");
 
-        pictureApp.doChat(req, "chat-img-2");
+        chatService.chat(req, "chat-img-2");
 
         verify(chatModel).call(captor.capture());
         Prompt prompt = captor.getValue();
@@ -174,7 +175,7 @@ class PictureAppMultimodalTest {
 
         ChatRequest req = new ChatRequest("分析这张图", null, false, null, "not-a-url://garbage");
 
-        pictureApp.doChat(req, "chat-img-3");
+        chatService.chat(req, "chat-img-3");
 
         verify(chatModel).call(captor.capture());
         UserMessage lastUser = (UserMessage) captor.getValue().getInstructions().stream()
@@ -201,7 +202,7 @@ class PictureAppMultimodalTest {
 
         ChatRequest req = new ChatRequest("开始生成", null, true, null, null);
 
-        ChatResponseVO vo = pictureApp.doChat(req, "chat-gen-1");
+        ChatResponseVO vo = chatService.chat(req, "chat-gen-1");
 
         assertThat(vo.type()).isEqualTo("image_generated");
         assertThat(vo.imageUrl()).isEqualTo("https://cdn.example.com/img.png");
@@ -222,7 +223,7 @@ class PictureAppMultimodalTest {
 
         ChatRequest req = new ChatRequest("开始生成", null, true, null, null);
 
-        assertThatThrownBy(() -> pictureApp.doChat(req, "chat-gen-2"))
+        assertThatThrownBy(() -> chatService.chat(req, "chat-gen-2"))
                 .isInstanceOf(BusinessException.class)
                 .extracting(e -> ((BusinessException) e).getCode())
                 .isEqualTo(ErrorCode.IMAGE_GENERATION_FAILED.getCode());
@@ -243,7 +244,7 @@ class PictureAppMultimodalTest {
         ChatRequest req = new ChatRequest("分析这张图", null, false, b64, null,
                 ChatRequest.MODE_IMAGE_ANALYSIS);
 
-        ChatResponseVO vo = pictureApp.doChat(req, "chat-analysis-1");
+        ChatResponseVO vo = chatService.chat(req, "chat-analysis-1");
 
         assertThat(vo.type()).isEqualTo("image_analyzed");
         assertThat(vo.imagePrompt()).isEqualTo("snow mountain sunrise");
@@ -261,7 +262,7 @@ class PictureAppMultimodalTest {
         ChatRequest req = new ChatRequest("分析这张图", null, false, null, null,
                 ChatRequest.MODE_IMAGE_ANALYSIS);
 
-        assertThatThrownBy(() -> pictureApp.doChat(req, "chat-analysis-2"))
+        assertThatThrownBy(() -> chatService.chat(req, "chat-analysis-2"))
                 .isInstanceOf(BusinessException.class)
                 .extracting(e -> ((BusinessException) e).getCode())
                 .isEqualTo(ErrorCode.PARAMS_ERROR.getCode());
@@ -276,7 +277,7 @@ class PictureAppMultimodalTest {
     void discussion_neverCallsImageService() {
         when(chatModel.call(any(Prompt.class))).thenReturn(responseOf(jsonChat("聊天")));
 
-        pictureApp.doChat(new ChatRequest("hi", null, null, null, null), "chat-disc");
+        chatService.chat(new ChatRequest("hi", null, null, null, null), "chat-disc");
 
         verify(imageGenService, never()).generate(any(), any(), any());
     }

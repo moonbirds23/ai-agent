@@ -1,16 +1,17 @@
 package com.zzp.aiagent.app;
 
-import com.zzp.aiagent.common.PromptTemplate;
+import com.zzp.aiagent.utils.PromptTemplate;
 import com.zzp.aiagent.exception.BusinessException;
 import com.zzp.aiagent.exception.ErrorCode;
-import com.zzp.aiagent.image.ImageGenerationService;
-import com.zzp.aiagent.image.VisionAnalysisService;
-import com.zzp.aiagent.gallery.GalleryProperties;
-import com.zzp.aiagent.gallery.GalleryService;
-import com.zzp.aiagent.memory.ChatHistoryRepository;
+import com.zzp.aiagent.service.ImageGenerationService;
+import com.zzp.aiagent.service.VisionAnalysisService;
+import com.zzp.aiagent.domain.gallery.GalleryProperties;
+import com.zzp.aiagent.service.GalleryService;
+import com.zzp.aiagent.repository.ChatHistoryRepository;
 import com.zzp.aiagent.memory.ChatMemoryProperties;
-import com.zzp.aiagent.rag.PromptReferenceAssembler;
-import com.zzp.aiagent.rag.RagService;
+import com.zzp.aiagent.service.impl.ChatServiceImpl;
+import com.zzp.aiagent.service.impl.PromptReferenceAssembler;
+import com.zzp.aiagent.service.RagService;
 import com.zzp.aiagent.model.dto.chat.ChatRequest;
 import com.zzp.aiagent.model.dto.image.ImageGenerationResult;
 import com.zzp.aiagent.model.dto.image.VisionAnalysisResult;
@@ -57,7 +58,7 @@ class PictureAppStreamTest {
     private ChatHistoryRepository chatHistoryRepo;
     private ChatMemoryProperties chatMemoryProps;
     private GalleryProperties galleryProps;
-    private PictureApp pictureApp;
+    private ChatServiceImpl chatService;
 
     private static ChatResponse chunkOf(String text) {
         return new ChatResponse(List.of(
@@ -75,9 +76,9 @@ class PictureAppStreamTest {
         chatHistoryRepo = mock(ChatHistoryRepository.class);
         chatMemoryProps = new ChatMemoryProperties(50, 7, 200);
         galleryProps = new GalleryProperties(7, "0 0 3 * * ?");
-        when(ragService.buildContext(any())).thenReturn(com.zzp.aiagent.rag.model.RagContext.empty());
+        when(ragService.buildContext(any())).thenReturn(com.zzp.aiagent.domain.rag.RagContext.empty());
         when(assembler.assemble(any(), any())).thenAnswer(inv -> inv.getArgument(0));
-        pictureApp = new PictureApp(chatModel, MessageWindowChatMemory.builder()
+        chatService = new ChatServiceImpl(chatModel, MessageWindowChatMemory.builder()
                 .chatMemoryRepository(new InMemoryChatMemoryRepository())
                 .maxMessages(100)
                 .build(), new PromptTemplate(),
@@ -103,7 +104,7 @@ class PictureAppStreamTest {
         when(chatModel.stream(any(Prompt.class))).thenReturn(
                 Flux.just(chunkOf("好"), chunkOf("的"), chunkOf("，")));
 
-        Flux<StreamEventVO> stream = pictureApp.doChatStream(req("雪景"), "chat-1");
+        Flux<StreamEventVO> stream = chatService.chatStream(req("雪景"), "chat-1");
 
         StepVerifier.create(stream)
                 .assertNext(e -> assertThat(e.type()).isEqualTo("chatId"))
@@ -125,7 +126,7 @@ class PictureAppStreamTest {
         when(chatModel.stream(any(Prompt.class))).thenReturn(
                 Flux.just(chunkOf("好的，正在为您生成")));
 
-        Flux<StreamEventVO> stream = pictureApp.doChatStream(req("雪景"), "chat-1");
+        Flux<StreamEventVO> stream = chatService.chatStream(req("雪景"), "chat-1");
 
         StepVerifier.create(stream)
                 .expectNextMatches(e -> "chatId".equals(e.type()))
@@ -150,7 +151,7 @@ class PictureAppStreamTest {
         when(chatModel.stream(any(Prompt.class))).thenReturn(
                 Flux.just(chunkOf("a"), chunkOf("b")));
 
-        Flux<StreamEventVO> stream = pictureApp.doChatStream(req("test"), "chat-X");
+        Flux<StreamEventVO> stream = chatService.chatStream(req("test"), "chat-X");
 
         StepVerifier.create(stream)
                 .assertNext(e -> assertThat(e.type()).isEqualTo("chatId"))
@@ -170,7 +171,7 @@ class PictureAppStreamTest {
     void firstEvent_containsChatId() {
         when(chatModel.stream(any(Prompt.class))).thenReturn(Flux.just(chunkOf("ok")));
 
-        Flux<StreamEventVO> stream = pictureApp.doChatStream(req("test"), "my-chat-id");
+        Flux<StreamEventVO> stream = chatService.chatStream(req("test"), "my-chat-id");
 
         StepVerifier.create(stream)
                 .assertNext(e -> {
@@ -196,7 +197,7 @@ class PictureAppStreamTest {
                 "\"style\":\"写实\",\"dimensions\":\"1024x1024\",\"revisedPrompt\":null}";
         when(chatModel.stream(any(Prompt.class))).thenReturn(Flux.just(chunkOf(json)));
 
-        Flux<StreamEventVO> stream = pictureApp.doChatStream(req("生成雪景"), "chat-1");
+        Flux<StreamEventVO> stream = chatService.chatStream(req("生成雪景"), "chat-1");
 
         StepVerifier.create(stream)
                 .expectNextMatches(e -> "chatId".equals(e.type()))
@@ -225,7 +226,7 @@ class PictureAppStreamTest {
         when(chatModel.stream(any(Prompt.class))).thenReturn(
                 Flux.just(chunkOf("这是一段纯文本回复，不是JSON格式")));
 
-        Flux<StreamEventVO> stream = pictureApp.doChatStream(req("你好"), "chat-1");
+        Flux<StreamEventVO> stream = chatService.chatStream(req("你好"), "chat-1");
 
         StepVerifier.create(stream)
                 .expectNextMatches(e -> "chatId".equals(e.type()))
@@ -252,7 +253,7 @@ class PictureAppStreamTest {
     void emptyTokenStream_doneHasEmptyMessage() {
         when(chatModel.stream(any(Prompt.class))).thenReturn(Flux.empty());
 
-        Flux<StreamEventVO> stream = pictureApp.doChatStream(req("test"), "chat-1");
+        Flux<StreamEventVO> stream = chatService.chatStream(req("test"), "chat-1");
 
         StepVerifier.create(stream)
                 .assertNext(e -> assertThat(e.type()).isEqualTo("chatId"))
@@ -274,7 +275,7 @@ class PictureAppStreamTest {
         ChatRequest req = new ChatRequest("生成雪景", null, true, null, null,
                 ChatRequest.MODE_IMAGE_GENERATION);
 
-        Flux<StreamEventVO> stream = pictureApp.doChatStream(req, "chat-gen");
+        Flux<StreamEventVO> stream = chatService.chatStream(req, "chat-gen");
 
         StepVerifier.create(stream)
                 .assertNext(e -> assertThat(e.type()).isEqualTo("chatId"))
@@ -308,7 +309,7 @@ class PictureAppStreamTest {
         ChatRequest req = new ChatRequest("分析这张图", null, false, b64, null,
                 ChatRequest.MODE_IMAGE_ANALYSIS);
 
-        Flux<StreamEventVO> stream = pictureApp.doChatStream(req, "chat-analysis");
+        Flux<StreamEventVO> stream = chatService.chatStream(req, "chat-analysis");
 
         StepVerifier.create(stream)
                 .assertNext(e -> assertThat(e.type()).isEqualTo("chatId"))
@@ -330,7 +331,7 @@ class PictureAppStreamTest {
         ChatRequest req = new ChatRequest("分析这张图", null, false, null, null,
                 ChatRequest.MODE_IMAGE_ANALYSIS);
 
-        Flux<StreamEventVO> stream = pictureApp.doChatStream(req, "chat-analysis-empty");
+        Flux<StreamEventVO> stream = chatService.chatStream(req, "chat-analysis-empty");
 
         StepVerifier.create(stream)
                 .assertNext(e -> assertThat(e.type()).isEqualTo("chatId"))
@@ -355,7 +356,7 @@ class PictureAppStreamTest {
         when(chatModel.stream(any(Prompt.class)))
                 .thenReturn(Flux.error(new RuntimeException("连接中断")));
 
-        Flux<StreamEventVO> stream = pictureApp.doChatStream(req("test"), "chat-1");
+        Flux<StreamEventVO> stream = chatService.chatStream(req("test"), "chat-1");
 
         StepVerifier.create(stream)
                 .expectNextMatches(e -> "chatId".equals(e.type()))
@@ -379,7 +380,7 @@ class PictureAppStreamTest {
         when(chatModel.stream(any(Prompt.class)))
                 .thenReturn(Flux.error(new BusinessException(ErrorCode.CONTENT_BLOCKED)));
 
-        Flux<StreamEventVO> stream = pictureApp.doChatStream(req("test"), "chat-1");
+        Flux<StreamEventVO> stream = chatService.chatStream(req("test"), "chat-1");
 
         StepVerifier.create(stream)
                 .expectNextMatches(e -> "chatId".equals(e.type()))
