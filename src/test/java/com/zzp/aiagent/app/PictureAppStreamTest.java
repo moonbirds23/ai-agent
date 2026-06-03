@@ -5,10 +5,10 @@ import com.zzp.aiagent.exception.BusinessException;
 import com.zzp.aiagent.exception.ErrorCode;
 import com.zzp.aiagent.service.ImageGenerationService;
 import com.zzp.aiagent.service.VisionAnalysisService;
-import com.zzp.aiagent.domain.gallery.GalleryProperties;
+import com.zzp.aiagent.service.ChatMediaService;
+import com.zzp.aiagent.service.ConversationLimitService;
 import com.zzp.aiagent.service.GalleryService;
-import com.zzp.aiagent.repository.ChatHistoryRepository;
-import com.zzp.aiagent.memory.ChatMemoryProperties;
+import com.zzp.aiagent.service.impl.ChatMediaServiceImpl;
 import com.zzp.aiagent.service.impl.ChatServiceImpl;
 import com.zzp.aiagent.service.impl.PromptReferenceAssembler;
 import com.zzp.aiagent.service.RagService;
@@ -55,9 +55,8 @@ class PictureAppStreamTest {
     private RagService ragService;
     private PromptReferenceAssembler assembler;
     private GalleryService galleryService;
-    private ChatHistoryRepository chatHistoryRepo;
-    private ChatMemoryProperties chatMemoryProps;
-    private GalleryProperties galleryProps;
+    private ChatMediaService chatMediaService;
+    private ConversationLimitService conversationLimitService;
     private ChatServiceImpl chatService;
 
     private static ChatResponse chunkOf(String text) {
@@ -73,9 +72,8 @@ class PictureAppStreamTest {
         ragService = mock(RagService.class);
         assembler = mock(PromptReferenceAssembler.class);
         galleryService = mock(GalleryService.class);
-        chatHistoryRepo = mock(ChatHistoryRepository.class);
-        chatMemoryProps = new ChatMemoryProperties(50, 7, 200);
-        galleryProps = new GalleryProperties(7, "0 0 3 * * ?");
+        chatMediaService = new ChatMediaServiceImpl(galleryService);
+        conversationLimitService = mock(ConversationLimitService.class);
         when(ragService.buildContext(any())).thenReturn(com.zzp.aiagent.domain.rag.RagContext.empty());
         when(assembler.assemble(any(), any())).thenAnswer(inv -> inv.getArgument(0));
         chatService = new ChatServiceImpl(chatModel, MessageWindowChatMemory.builder()
@@ -84,7 +82,7 @@ class PictureAppStreamTest {
                 .build(), new PromptTemplate(),
                 new com.fasterxml.jackson.databind.ObjectMapper(),
                 imageGenService, visionAnalysisService, ragService, assembler, galleryService,
-                chatHistoryRepo, chatMemoryProps, galleryProps);
+                chatMediaService, conversationLimitService);
     }
 
     private static ChatRequest req(String message) {
@@ -346,12 +344,12 @@ class PictureAppStreamTest {
     // ── 异常降级 ─────────────────────────────────────────────────
 
     /**
-     * 目的：验证 RuntimeException（非业务异常）走兜底返回泛化错误提示。
-     * 实现：mock Flux.error(RuntimeException) → doChatStream → 断言 error 事件的消息。
-     * 结果：error.content="流式处理异常，请重试"（不暴露原始异常信息）。
+     * 目的：验证 RuntimeException（非业务异常）被 ExceptionGuardAdvisor 捕获后转为友好提示 token。
+     * ExceptionGuardAdvisor.adviseStream() 中的 .onErrorResume(e -> ...) 会兜底所有异常，
+     * 返回包含 "系统内部异常" 的 ChatClientResponse，经 .content() 后变成 token 事件。
      */
     @Test
-    @DisplayName("RuntimeException → 泛化错误提示")
+    @DisplayName("RuntimeException → ExceptionGuard 转为友好提示 token")
     void exceptionInStream_returnsErrorEvent() {
         when(chatModel.stream(any(Prompt.class)))
                 .thenReturn(Flux.error(new RuntimeException("连接中断")));
@@ -361,21 +359,20 @@ class PictureAppStreamTest {
         StepVerifier.create(stream)
                 .expectNextMatches(e -> "chatId".equals(e.type()))
                 .assertNext(e -> {
-                    assertThat(e.type()).isEqualTo("error");
-                    assertThat(e.content()).isEqualTo("流式处理异常，请重试");
+                    assertThat(e.type()).isEqualTo("token");
+                    assertThat(e.content()).isEqualTo("系统内部异常");
                 })
+                .expectNextMatches(e -> "done".equals(e.type()))
                 .verifyComplete();
     }
 
     /**
-     * 目的：验证 BusinessException 能透传具体错误消息给前端（如敏感词提示）。
-     * 原因：Spring AI M6 的 Observation scope 导致 ExceptionGuardAdvisor 的流式兜底不生效，
-     *       PictureApp 的 .onErrorResume() 是实际兜底点，需要区分 BusinessException 提取消息。
-     * 实现：mock Flux.error(BusinessException(CONTENT_BLOCKED)) → doChatStream → 断言 error.content。
-     * 结果：error.content="请求包含不支持的词汇"（ErrorCode 的 message），而非泛化错误。
+     * 目的：验证 BusinessException 被 ExceptionGuardAdvisor 捕获后透传具体错误消息。
+     * ExceptionGuardAdvisor.adviseStream() 的 .onErrorResume(BusinessException.class, ...)
+     * 优先匹配，将 e.getMessage() 设置为友好回复的文本内容。
      */
     @Test
-    @DisplayName("BusinessException → 透传具体错误消息")
+    @DisplayName("BusinessException → ExceptionGuard 透传具体错误消息")
     void businessException_returnsSpecificMessage() {
         when(chatModel.stream(any(Prompt.class)))
                 .thenReturn(Flux.error(new BusinessException(ErrorCode.CONTENT_BLOCKED)));
@@ -385,9 +382,10 @@ class PictureAppStreamTest {
         StepVerifier.create(stream)
                 .expectNextMatches(e -> "chatId".equals(e.type()))
                 .assertNext(e -> {
-                    assertThat(e.type()).isEqualTo("error");
+                    assertThat(e.type()).isEqualTo("token");
                     assertThat(e.content()).isEqualTo("请求包含不支持的词汇");
                 })
+                .expectNextMatches(e -> "done".equals(e.type()))
                 .verifyComplete();
     }
 }

@@ -1,6 +1,7 @@
 package com.zzp.aiagent.service;
 
 import com.zzp.aiagent.domain.gallery.GalleryImportUrlRequest;
+import com.zzp.aiagent.domain.gallery.GalleryPageResult;
 import com.zzp.aiagent.model.entity.GalleryPicture;
 import com.zzp.aiagent.domain.gallery.GalleryQueryRequest;
 import com.zzp.aiagent.domain.gallery.GalleryUploadRequest;
@@ -13,7 +14,7 @@ public interface GalleryService {
 
     GalleryPicture importUrl(GalleryImportUrlRequest request);
 
-    List<GalleryPicture> listAll(GalleryQueryRequest request);
+    GalleryPageResult listAll(GalleryQueryRequest request);
 
     GalleryPicture getById(Long id);
 

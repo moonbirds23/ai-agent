@@ -8,7 +8,6 @@ import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
-import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.stereotype.Repository;
 
 import java.sql.Timestamp;
@@ -47,35 +46,23 @@ public class PostgresPictureAiProfileRepository implements PictureAiProfileRepos
 
     @Override
     public PictureAiProfile save(PictureAiProfile profile) {
-        if (findByPictureId(profile.pictureId()).isPresent()) {
-            return update(profile);
-        }
         String sql = """
                 INSERT INTO picture_ai_profile (picture_id, subject, scene, style, colors,
                     composition, lighting, mood, image_prompt, index_text, vector_status, analyzed_at)
                 VALUES (:pictureId, :subject, :scene, :style, :colors,
                     :composition, :lighting, :mood, :imagePrompt, :indexText, :vectorStatus, :analyzedAt)
+                ON CONFLICT (picture_id) DO UPDATE SET
+                    subject = EXCLUDED.subject, scene = EXCLUDED.scene, style = EXCLUDED.style,
+                    colors = EXCLUDED.colors, composition = EXCLUDED.composition, lighting = EXCLUDED.lighting,
+                    mood = EXCLUDED.mood, image_prompt = EXCLUDED.image_prompt,
+                    index_text = EXCLUDED.index_text, vector_status = EXCLUDED.vector_status,
+                    analyzed_at = EXCLUDED.analyzed_at, update_time = now()
                 """;
         MapSqlParameterSource params = profileParams(profile);
-        GeneratedKeyHolder keyHolder = new GeneratedKeyHolder();
-        jdbc.update(sql, params, keyHolder, new String[]{"id"});
+        jdbc.update(sql, params);
         log.debug("[PostgresProfileRepo] 保存画像 pictureId={}", profile.pictureId());
         return findByPictureId(profile.pictureId())
                 .orElseThrow(() -> new RuntimeException("保存后读取失败 pictureId=" + profile.pictureId()));
-    }
-
-    private PictureAiProfile update(PictureAiProfile profile) {
-        String sql = """
-                UPDATE picture_ai_profile SET subject=:subject, scene=:scene, style=:style,
-                    colors=:colors, composition=:composition, lighting=:lighting, mood=:mood,
-                    image_prompt=:imagePrompt, index_text=:indexText, vector_status=:vectorStatus,
-                    analyzed_at=:analyzedAt, update_time=now()
-                WHERE picture_id=:pictureId
-                """;
-        jdbc.update(sql, profileParams(profile));
-        log.debug("[PostgresProfileRepo] 更新画像 pictureId={}", profile.pictureId());
-        return findByPictureId(profile.pictureId())
-                .orElseThrow(() -> new RuntimeException("更新后读取失败 pictureId=" + profile.pictureId()));
     }
 
     @Override

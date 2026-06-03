@@ -6,6 +6,7 @@ import com.zzp.aiagent.exception.BusinessException;
 import com.zzp.aiagent.exception.ErrorCode;
 import com.zzp.aiagent.model.dto.image.ImageGenerationResult;
 import com.zzp.aiagent.service.ImageGenerationService;
+import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.web.client.RestTemplateBuilder;
@@ -46,6 +47,7 @@ public class ZhipuImageGenerationService implements ImageGenerationService {
     }
 
     @Override
+    @CircuitBreaker(name = "zhipu-image-gen")
     public ImageGenerationResult generate(String prompt, String style, String dimensions) {
         if (apiKey == null || apiKey.isBlank()) {
             throw new BusinessException(ErrorCode.AI_AUTH_FAILED, "智谱 API Key 未配置");
@@ -88,7 +90,16 @@ public class ZhipuImageGenerationService implements ImageGenerationService {
         } catch (HttpStatusCodeException e) {
             String message = extractErrorMessage(e.getResponseBodyAsString());
             log.warn("[ZhipuImage] API请求失败 status={} message={}", e.getStatusCode(), message);
-            throw new BusinessException(ErrorCode.IMAGE_GENERATION_FAILED, "图片生成失败: " + message);
+            int status = e.getStatusCode().value();
+            if (status == 429) {
+                throw new BusinessException(ErrorCode.AI_RATE_LIMIT, "AI 服务请求过于频繁");
+            } else if (status == 503) {
+                throw new BusinessException(ErrorCode.AI_MODEL_UNAVAILABLE, "AI 模型暂不可用");
+            } else if (status >= 400 && status < 500) {
+                throw new BusinessException(ErrorCode.PARAMS_ERROR, "图片生成失败: " + message);
+            } else {
+                throw new BusinessException(ErrorCode.IMAGE_GENERATION_FAILED, "图片生成失败: " + message);
+            }
         } catch (Exception e) {
             log.error("[ZhipuImage] 生图异常", e);
             throw new BusinessException(ErrorCode.IMAGE_GENERATION_FAILED, "图片生成失败，请稍后重试");

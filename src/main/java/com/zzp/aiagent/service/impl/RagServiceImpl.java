@@ -69,6 +69,18 @@ public class RagServiceImpl implements RagService {
         RagContext ctx = RagContext.empty();
         String originalQuery = request.message();
 
+        // Global RAG toggle: when disabled, only Layer 1 (explicit user-specified refs) is honored
+        if (!ragProperties.enabled()) {
+            if (request.referencePictureIds() != null && !request.referencePictureIds().isEmpty()) {
+                List<RagContext.ReferencePicture> refs = explicitResolver.resolve(request.referencePictureIds());
+                for (RagContext.ReferencePicture ref : refs) {
+                    ctx.addExplicit(ref);
+                }
+            }
+            log.info("[RagService] RAG 已全局关闭，仅保留显式参考图: explicit={}", ctx.getExplicitReferences().size());
+            return ctx;
+        }
+
         // Layer 1: 明确参考图（最高优先级）—— 两个路径共用
         if (request.referencePictureIds() != null && !request.referencePictureIds().isEmpty()) {
             List<RagContext.ReferencePicture> refs = explicitResolver.resolve(request.referencePictureIds());

@@ -1,6 +1,8 @@
 package com.zzp.aiagent.manager;
 
 import com.zzp.aiagent.domain.vector.VectorSearchHit;
+import com.zzp.aiagent.exception.BusinessException;
+import com.zzp.aiagent.exception.ErrorCode;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.vectorstore.VectorStore;
@@ -68,7 +70,7 @@ public class PgVectorIndexService implements VectorIndexService {
                     .toList();
         } catch (Exception e) {
             log.warn("[PgVectorIndex] 检索失败 query={}", query, e);
-            return Collections.emptyList();
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "向量检索服务暂时不可用");
         }
     }
 

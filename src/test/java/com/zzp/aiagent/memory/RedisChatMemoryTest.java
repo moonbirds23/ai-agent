@@ -22,6 +22,7 @@ import java.time.Duration;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.Executor;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.*;
@@ -36,6 +37,7 @@ class RedisChatMemoryTest {
     private ChatHistoryRepository historyRepo;
     private ChatMemoryProperties props;
     private RedisChatMemory memory;
+    private Executor executor;
 
     @SuppressWarnings({"unchecked", "rawtypes"})
     @BeforeEach
@@ -56,9 +58,11 @@ class RedisChatMemoryTest {
         ObjectProvider storageProvider = mock(ObjectProvider.class);
         when(storageProvider.getIfAvailable()).thenReturn(null);
 
+        executor = Runnable::run;
+
         memory = new RedisChatMemory(redis, new ObjectMapper(),
                 historyRepo, props,
-                galleryProvider, visionProvider, storageProvider);
+                galleryProvider, visionProvider, storageProvider, executor);
     }
 
     @SuppressWarnings("unchecked")
@@ -265,7 +269,7 @@ class RedisChatMemoryTest {
         when(storageProvider.getIfAvailable()).thenReturn(null);
 
         var m = new RedisChatMemory(redis, new ObjectMapper(), historyRepo, props,
-                galleryProvider, visionProvider, storageProvider);
+                galleryProvider, visionProvider, storageProvider, executor);
 
         when(listOps.rightPushAll(anyString(), ArgumentMatchers.<String>anyCollection())).thenReturn(1L);
         when(listOps.size(anyString())).thenReturn(null);
@@ -385,7 +389,7 @@ class RedisChatMemoryTest {
         when(storageProvider.getIfAvailable()).thenReturn(null);
 
         var customMemory = new RedisChatMemory(redis, new ObjectMapper(), historyRepo,
-                customProps, galleryProvider, visionProvider, storageProvider);
+                customProps, galleryProvider, visionProvider, storageProvider, executor);
 
         String key = "chat:memory:chat-1";
         when(listOps.size(key)).thenReturn(100L);

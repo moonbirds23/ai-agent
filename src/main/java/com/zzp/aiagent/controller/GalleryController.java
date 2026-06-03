@@ -4,15 +4,22 @@ import com.zzp.aiagent.common.BaseResponse;
 import com.zzp.aiagent.common.ResultUtils;
 import com.zzp.aiagent.service.GalleryService;
 import com.zzp.aiagent.domain.gallery.GalleryImportUrlRequest;
+import com.zzp.aiagent.domain.gallery.GalleryPageResult;
 import com.zzp.aiagent.model.entity.GalleryPicture;
 import com.zzp.aiagent.domain.gallery.GalleryQueryRequest;
 import com.zzp.aiagent.domain.gallery.GalleryUploadRequest;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
+import java.io.ByteArrayInputStream;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Profile;
+import org.springframework.core.io.InputStreamResource;
+import org.springframework.core.io.Resource;
+import org.springframework.http.CacheControl;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -36,19 +43,19 @@ public class GalleryController {
 
     @PostMapping("/upload")
     @Operation(summary = "上传图片(Base64)", description = "上传Base64编码的图片到图库")
-    public BaseResponse<GalleryPicture> upload(@RequestBody GalleryUploadRequest request) {
+    public BaseResponse<GalleryPicture> upload(@Valid @RequestBody GalleryUploadRequest request) {
         return ResultUtils.success(galleryService.upload(request));
     }
 
     @PostMapping("/import-url")
     @Operation(summary = "通过URL导入图片", description = "从远程URL下载图片并导入图库")
-    public BaseResponse<GalleryPicture> importUrl(@RequestBody GalleryImportUrlRequest request) {
+    public BaseResponse<GalleryPicture> importUrl(@Valid @RequestBody GalleryImportUrlRequest request) {
         return ResultUtils.success(galleryService.importUrl(request));
     }
 
     @GetMapping("/page")
     @Operation(summary = "分页查询图片", description = "按关键字、分类、标签等条件分页查询图库图片")
-    public BaseResponse<List<GalleryPicture>> page(
+    public BaseResponse<GalleryPageResult> page(
             @RequestParam(defaultValue = "1") int page,
             @RequestParam(defaultValue = "20") int pageSize,
             @RequestParam(required = false) String keyword,
@@ -83,15 +90,15 @@ public class GalleryController {
 
     @GetMapping("/files/{pictureId}")
     @Operation(summary = "获取图片文件", description = "根据图片ID返回图片文件二进制数据")
-    public ResponseEntity<byte[]> serveFile(@PathVariable Long pictureId) {
+    public ResponseEntity<Resource> serveFile(@PathVariable Long pictureId) {
         GalleryPicture picture = galleryService.getById(pictureId);
         byte[] bytes = galleryService.downloadPicture(pictureId);
         String ext = picture.picFormat() != null ? picture.picFormat() : "png";
-        MediaType mediaType = switch (ext.toLowerCase()) {
-            case "jpg", "jpeg" -> MediaType.IMAGE_JPEG;
-            case "gif" -> MediaType.IMAGE_GIF;
-            default -> MediaType.IMAGE_PNG;
-        };
-        return ResponseEntity.ok().contentType(mediaType).body(bytes);
+        InputStreamResource resource = new InputStreamResource(
+                new ByteArrayInputStream(bytes));
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType("image/" + ext))
+                .cacheControl(CacheControl.maxAge(1, TimeUnit.DAYS))
+                .body(resource);
     }
 }

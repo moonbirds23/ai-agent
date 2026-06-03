@@ -10,16 +10,15 @@ import com.zzp.aiagent.utils.PromptTemplate;
 import com.zzp.aiagent.common.ThrowUtils;
 import com.zzp.aiagent.exception.BusinessException;
 import com.zzp.aiagent.exception.ErrorCode;
+import com.zzp.aiagent.service.ChatMediaService;
+import com.zzp.aiagent.service.ConversationLimitService;
 import com.zzp.aiagent.service.GalleryService;
-import com.zzp.aiagent.domain.gallery.GalleryProperties;
 import com.zzp.aiagent.domain.gallery.GalleryImportUrlRequest;
 import com.zzp.aiagent.model.entity.GalleryPicture;
 import com.zzp.aiagent.domain.gallery.GalleryUploadRequest;
 import com.zzp.aiagent.model.enums.StorageLocation;
 import com.zzp.aiagent.service.ImageGenerationService;
 import com.zzp.aiagent.service.VisionAnalysisService;
-import com.zzp.aiagent.repository.ChatHistoryRepository;
-import com.zzp.aiagent.memory.ChatMemoryProperties;
 import com.zzp.aiagent.model.dto.chat.ChatRequest;
 import com.zzp.aiagent.service.RagService;
 import com.zzp.aiagent.domain.rag.RagContext;
@@ -39,17 +38,13 @@ import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.converter.BeanOutputConverter;
 import org.springframework.ai.content.Media;
 import org.springframework.context.annotation.Profile;
-import org.springframework.core.io.ByteArrayResource;
 import org.springframework.stereotype.Service;
-import org.springframework.util.MimeTypeUtils;
 import reactor.core.publisher.Flux;
 
-import java.net.URL;
 import java.util.Base64;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
-import java.util.function.Consumer;
 
 @Service
 @Profile("!test")
@@ -68,16 +63,16 @@ public class ChatServiceImpl implements ChatService {
     private final RagService ragService;
     private final PromptReferenceAssembler assembler;
     private final GalleryService galleryService;
-    private final ChatHistoryRepository chatHistoryRepo;
-    private final ChatMemoryProperties chatMemoryProps;
-    private final GalleryProperties galleryProps;
+    private final ChatMediaService chatMediaService;
+    private final ConversationLimitService conversationLimitService;
 
     public ChatServiceImpl(ChatModel openAiChatModel, ChatMemory chatMemory, PromptTemplate promptTemplate,
                            ObjectMapper objectMapper, ImageGenerationService imageGenerationService,
                            VisionAnalysisService visionAnalysisService,
                            RagService ragService, PromptReferenceAssembler assembler,
-                           GalleryService galleryService, ChatHistoryRepository chatHistoryRepo,
-                           ChatMemoryProperties chatMemoryProps, GalleryProperties galleryProps) {
+                           GalleryService galleryService,
+                           ChatMediaService chatMediaService,
+                           ConversationLimitService conversationLimitService) {
         this.chatMemory = chatMemory;
         this.outputConverter = new BeanOutputConverter<>(ImageAgentResponse.class);
         this.objectMapper = objectMapper;
@@ -86,9 +81,8 @@ public class ChatServiceImpl implements ChatService {
         this.ragService = ragService;
         this.assembler = assembler;
         this.galleryService = galleryService;
-        this.chatHistoryRepo = chatHistoryRepo;
-        this.chatMemoryProps = chatMemoryProps;
-        this.galleryProps = galleryProps;
+        this.chatMediaService = chatMediaService;
+        this.conversationLimitService = conversationLimitService;
         String systemPrompt = promptTemplate.render("default", "system",
                 "outputFormat", outputConverter.getFormat());
         this.chatClient = ChatClient.builder(openAiChatModel)
@@ -108,7 +102,7 @@ public class ChatServiceImpl implements ChatService {
 
     @Override
     public ChatResponseVO chat(ChatRequest request, String chatId) {
-        checkConversationLimit(chatId);
+        conversationLimitService.checkLimit(chatId);
         return switch (resolveMode(request)) {
             case ChatRequest.MODE_IMAGE_ANALYSIS -> handleImageAnalysis(request, chatId);
             case ChatRequest.MODE_IMAGE_GENERATION -> handleGeneration(request, chatId);
@@ -122,7 +116,12 @@ public class ChatServiceImpl implements ChatService {
     private ChatResponseVO handleDiscussion(ChatRequest request, String chatId) {
         GalleryPicture saved = autoSaveToCacheGallery(request);
         ImageAgentResponse aiResp = chatClient.prompt()
-                .user(buildUserSpec(request, saved))
+                .user(spec -> {
+                    spec.text(request.message());
+                    Media media = chatMediaService.createMedia(
+                            saved, request.imageBase64(), request.imageUrl());
+                    if (media != null) spec.media(media);
+                })
                 .advisors(spec -> spec
                         .param(ChatMemory.CONVERSATION_ID, chatId)
                         .param("chat_memory_retrieve_size", 10)
@@ -228,12 +227,17 @@ public class ChatServiceImpl implements ChatService {
         // 2.RAG上下文装配
         RagPrepared rag = prepareRagContext(request, chatId, "RAG");
         ImageAgentResponse aiResp = chatClient.prompt()
-                .user(spec -> buildGenerationUserSpec(spec, rag.originalMsg, saved))
-                .advisors(spec -> spec
-                        .param(ChatMemory.CONVERSATION_ID, chatId)
-                        .param("chat_memory_retrieve_size", 50)
-                        .param("chatId", chatId)
-                        .param(RagInjectionAdvisor.KEY_RAG_AUGMENTED, rag.augmentedMsg))
+                .user(spec -> {
+                    spec.text(rag.originalMsg);
+                    Media media = chatMediaService.createMedia(saved, null, null);
+                    if (media != null) spec.media(media);
+                })
+                .advisors(spec -> {
+                    spec.param(ChatMemory.CONVERSATION_ID, chatId)
+                            .param("chat_memory_retrieve_size", 50)
+                            .param("chatId", chatId);
+                    RagInjectionAdvisor.applyAugmentation(spec, rag.augmentedMsg);
+                })
                 .call()
                 .entity(outputConverter);
 
@@ -253,7 +257,7 @@ public class ChatServiceImpl implements ChatService {
 
     @Override
     public Flux<StreamEventVO> chatStream(ChatRequest request, String chatId) {
-        checkConversationLimit(chatId);
+        conversationLimitService.checkLimit(chatId);
         return switch (resolveMode(request)) {
             case ChatRequest.MODE_IMAGE_ANALYSIS -> handleImageAnalysisStream(request, chatId);
             case ChatRequest.MODE_IMAGE_GENERATION -> handleGenerationStream(request, chatId);
@@ -269,7 +273,12 @@ public class ChatServiceImpl implements ChatService {
         StringBuilder accumulator = new StringBuilder();
 
         Flux<StreamEventVO> tokenFlux = chatClient.prompt()
-                .user(buildUserSpec(request, saved))
+                .user(spec -> {
+                    spec.text(request.message());
+                    Media media = chatMediaService.createMedia(
+                            saved, request.imageBase64(), request.imageUrl());
+                    if (media != null) spec.media(media);
+                })
                 .advisors(spec -> spec
                         .param(ChatMemory.CONVERSATION_ID, chatId)
                         .param("chat_memory_retrieve_size", 10)
@@ -343,11 +352,17 @@ public class ChatServiceImpl implements ChatService {
 
         Flux<StreamEventVO> generateEvent = Flux.defer(() -> {
             ImageAgentResponse aiResp = chatClient.prompt()
-                    .user(spec -> buildGenerationUserSpec(spec, rag.originalMsg, saved))
-                    .advisors(spec -> spec
-                            .param(ChatMemory.CONVERSATION_ID, chatId)
-                            .param("chat_memory_retrieve_size", 50)
-                            .param("chatId", chatId))
+                    .user(spec -> {
+                        spec.text(rag.originalMsg);
+                        Media media = chatMediaService.createMedia(saved, null, null);
+                        if (media != null) spec.media(media);
+                    })
+                    .advisors(spec -> {
+                        spec.param(ChatMemory.CONVERSATION_ID, chatId)
+                                .param("chat_memory_retrieve_size", 50)
+                                .param("chatId", chatId);
+                        RagInjectionAdvisor.applyAugmentation(spec, rag.augmentedMsg);
+                    })
                     .call()
                     .entity(outputConverter);
 
@@ -420,7 +435,13 @@ public class ChatServiceImpl implements ChatService {
         }
         byte[] bytes;
         try {
-            bytes = Base64.getDecoder().decode(stripDataUrlPrefix(data));
+            // strip data URL prefix before decoding
+            String stripped = data;
+            int comma = stripped.indexOf(',');
+            if (stripped.startsWith("data:image/") && comma >= 0) {
+                stripped = stripped.substring(comma + 1);
+            }
+            bytes = Base64.getDecoder().decode(stripped);
         } catch (IllegalArgumentException e) {
             throw new BusinessException(ErrorCode.IMAGE_FORMAT_INVALID, "图片数据不是有效的 Base64");
         }
@@ -443,69 +464,9 @@ public class ChatServiceImpl implements ChatService {
         ));
     }
 
-    private Consumer<ChatClient.PromptUserSpec> buildUserSpec(ChatRequest request, GalleryPicture savedPicture) {
-        return spec -> {
-            spec.text(request.message());
-            // 已入库 → 用图库 URL（ChatMemory 可识别为 GALLERY）
-            if (savedPicture != null && savedPicture.url() != null) {
-                try {
-                    String mime = mimeTypeFromFormat(savedPicture.picFormat());
-                    spec.media(new Media(MimeTypeUtils.parseMimeType(mime),
-                            new URL(savedPicture.url()).toURI()));
-                    return;
-                } catch (Exception e) {
-                    log.warn("[ChatService] 图库URL构造失败，降级发送: {}", e.getMessage());
-                }
-            }
-            // 未入库 → 直接发送 base64 bytes
-            String imageBase64 = request.imageBase64();
-            String imageUrl = request.imageUrl();
-            if (imageBase64 != null && !imageBase64.isBlank()) {
-                byte[] bytes = Base64.getDecoder().decode(stripDataUrlPrefix(imageBase64));
-                spec.media(new Media(MimeTypeUtils.IMAGE_PNG, new ByteArrayResource(bytes)));
-            } else if (imageUrl != null && !imageUrl.isBlank()) {
-                try {
-                    spec.media(new Media(MimeTypeUtils.IMAGE_PNG, new URL(imageUrl).toURI()));
-                } catch (Exception e) {
-                    log.warn("[ChatService] 无效图片URL: {}", imageUrl, e);
-                }
-            }
-        };
-    }
-
-    private void buildGenerationUserSpec(ChatClient.PromptUserSpec spec, String augmentedMsg, GalleryPicture savedPicture) {
-        spec.text(augmentedMsg);
-        if (savedPicture != null && savedPicture.url() != null) {
-            try {
-                String mime = mimeTypeFromFormat(savedPicture.picFormat());
-                spec.media(new Media(MimeTypeUtils.parseMimeType(mime),
-                        new URL(savedPicture.url()).toURI()));
-            } catch (Exception e) {
-                log.warn("[ChatService] 生成模式：图库URL构造失败: {}", e.getMessage());
-            }
-        }
-    }
-
-    private static String mimeTypeFromFormat(String picFormat) {
-        if (picFormat == null) return "image/png";
-        return switch (picFormat.toLowerCase()) {
-            case "jpg", "jpeg" -> "image/jpeg";
-            case "webp" -> "image/webp";
-            case "gif" -> "image/gif";
-            case "bmp" -> "image/bmp";
-            default -> "image/png";
-        };
-    }
-
-    private String stripDataUrlPrefix(String imageBase64) {
-        String trimmed = imageBase64.trim();
-        int comma = trimmed.indexOf(',');
-        if (trimmed.startsWith("data:image/") && comma >= 0) {
-            return trimmed.substring(comma + 1);
-        }
-        return trimmed;
-    }
-
+    /**
+     * Try to parse streaming LLM output as structured JSON; fall back to plain text otherwise.
+     */
     private ChatResponseVO parseStructuredOrFallback(String rawText, String chatId) {
         try {
             ImageAgentResponse parsed = objectMapper.readValue(rawText, ImageAgentResponse.class);
@@ -514,13 +475,6 @@ public class ChatServiceImpl implements ChatService {
             log.warn("[Stream] 无法解析LLM输出为ImageAgentResponse，回退为纯文本 chatId={}", chatId);
             return ChatResponseVO.textOnly(chatId, rawText);
         }
-    }
-
-    private void checkConversationLimit(String chatId) {
-        int count = chatHistoryRepo.countByConversation(chatId);
-        ThrowUtils.throwIf(count >= chatMemoryProps.maxConversationMessages(),
-                ErrorCode.PARAMS_ERROR,
-                "会话消息已达上限(" + count + "/" + chatMemoryProps.maxConversationMessages() + ")，请开启新会话");
     }
 
     private GalleryPicture autoSaveToCacheGallery(ChatRequest request) {

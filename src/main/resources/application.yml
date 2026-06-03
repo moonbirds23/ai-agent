@@ -73,6 +73,34 @@ zhipu:
     api-key: ${ZHIPU_API_KEY:}
     model: ${ZHIPU_VISION_MODEL:glm-4.5v}
 
+resilience4j:
+  circuitbreaker:
+    instances:
+      zhipu-vision:
+        sliding-window-size: 10
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 30s
+        permitted-number-of-calls-in-half-open-state: 3
+      zhipu-image-gen:
+        sliding-window-size: 10
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 30s
+      zhipu-image-download:
+        sliding-window-size: 10
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 30s
+  retry:
+    instances:
+      zhipu-vision:
+        max-attempts: 3
+        wait-duration: 1s
+        retry-exceptions:
+          - org.springframework.web.client.HttpServerErrorException
+          - java.net.SocketTimeoutException
+      zhipu-image-gen:
+        max-attempts: 3
+        wait-duration: 2s
+
 server:
   port: 8231
   servlet:

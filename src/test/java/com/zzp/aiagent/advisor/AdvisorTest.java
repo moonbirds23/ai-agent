@@ -390,13 +390,13 @@ class AdvisorTest {
         }
 
         /**
-         * 目的：ExceptionGuard 的 order 必须为 MAX_VALUE，保证在所有 Advisor 之后执行，兜底一切异常。
-         * 结果：getOrder() == Integer.MAX_VALUE。
+         * 目的：ExceptionGuard 的 order 必须为 MIN_VALUE，保证在所有 Advisor 之前执行，最先兜底异常。
+         * 结果：getOrder() == Integer.MIN_VALUE。
          */
         @Test
-        @DisplayName("order 应为 Integer.MAX_VALUE（最后执行）")
-        void orderIsMax() {
-            assertThat(advisor.getOrder()).isEqualTo(Integer.MAX_VALUE);
+        @DisplayName("order 应为 Integer.MIN_VALUE（最优先执行）")
+        void orderIsMin() {
+            assertThat(advisor.getOrder()).isEqualTo(Integer.MIN_VALUE);
         }
     }
 }

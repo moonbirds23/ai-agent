@@ -8,6 +8,7 @@ import com.zzp.aiagent.domain.rag.RagProperties;
 import com.zzp.aiagent.domain.rag.RagCandidate;
 import com.zzp.aiagent.domain.rag.RagSearchCriteria;
 import com.zzp.aiagent.service.HybridGalleryRetriever;
+import com.zzp.aiagent.exception.BusinessException;
 import com.zzp.aiagent.manager.VectorIndexService;
 import com.zzp.aiagent.domain.vector.VectorSearchHit;
 import lombok.extern.slf4j.Slf4j;
@@ -50,8 +51,8 @@ public class HybridGalleryRetrieverImpl implements HybridGalleryRetriever {
         List<VectorSearchHit> hits;
         try {
             hits = vectorIndexService.search(query, oversample, criteria.minVectorScore());
-        } catch (Exception e) {
-            log.warn("[Hybrid] 向量检索失败，回退到关键词搜索 query={}: {}", query, e.getMessage());
+        } catch (BusinessException e) {
+            log.warn("[Hybrid] 向量检索失败，降级到关键词搜索 query={}: {}", query, e.getMessage());
             return fallbackToKeyword(criteria);
         }
 

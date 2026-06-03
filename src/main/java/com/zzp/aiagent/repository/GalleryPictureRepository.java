@@ -26,4 +26,12 @@ public interface GalleryPictureRepository {
 
     /** Keyword-based fallback search when vector search is unavailable */
     List<GalleryPicture> searchByKeyword(String query, int limit);
+
+    /** Paginated query with filters applied at the SQL level. */
+    List<GalleryPicture> findAllPaged(int offset, int limit, String keyword, String category,
+            List<String> tags, Boolean favoritedOnly, String sourceType);
+
+    /** Count of records matching the same filters (for total in pagination). */
+    int countFiltered(String keyword, String category, List<String> tags,
+            Boolean favoritedOnly, String sourceType);
 }

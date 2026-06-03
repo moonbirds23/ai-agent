@@ -19,6 +19,7 @@ import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.content.Media;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Profile;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -38,6 +39,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -59,6 +61,7 @@ public class RedisChatMemory implements ChatMemory {
     private final ObjectProvider<GalleryService> galleryServiceProvider;
     private final ObjectProvider<VisionAnalysisService> visionServiceProvider;
     private final ObjectProvider<ObjectStorageService> storageServiceProvider;
+    private final Executor executor;
 
     public RedisChatMemory(StringRedisTemplate redis,
                            ObjectMapper mapper,
@@ -66,7 +69,8 @@ public class RedisChatMemory implements ChatMemory {
                            ChatMemoryProperties props,
                            ObjectProvider<GalleryService> galleryServiceProvider,
                            ObjectProvider<VisionAnalysisService> visionServiceProvider,
-                           ObjectProvider<ObjectStorageService> storageServiceProvider) {
+                           ObjectProvider<ObjectStorageService> storageServiceProvider,
+                           @Qualifier("taskExecutor") Executor executor) {
         this.redis = redis;
         this.mapper = mapper;
         this.historyRepo = historyRepo;
@@ -75,6 +79,7 @@ public class RedisChatMemory implements ChatMemory {
         this.galleryServiceProvider = galleryServiceProvider;
         this.visionServiceProvider = visionServiceProvider;
         this.storageServiceProvider = storageServiceProvider;
+        this.executor = executor;
     }
 
     // ── get ───────────────────────────────────────────────
@@ -141,7 +146,7 @@ public class RedisChatMemory implements ChatMemory {
             } catch (Exception e) {
                 log.warn("[RedisChatMemory] PG写入失败 conv={}: {}", conversationId, e.getMessage());
             }
-        });
+        }, executor);
     }
 
     // ── clear ─────────────────────────────────────────────
@@ -155,6 +160,16 @@ public class RedisChatMemory implements ChatMemory {
             log.warn("[RedisChatMemory] PG删除失败 conv={}: {}", conversationId, e.getMessage());
         }
         log.debug("[RedisChatMemory] clear conversationId={}", conversationId);
+    }
+
+    // ── count ───────────────────────────────────────────────
+
+    /**
+     * 返回会话在 Redis List 中的消息数量（同步，无 PG 回退）。
+     */
+    public int count(String conversationId) {
+        Long size = redis.opsForList().size(key(conversationId));
+        return size != null ? size.intValue() : 0;
     }
 
     // ── Redis 读写 ─────────────────────────────────────────

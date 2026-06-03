@@ -62,6 +62,6 @@ public class ExceptionGuardAdvisor implements CallAdvisor, StreamAdvisor {
 
     @Override
     public int getOrder() {
-        return Integer.MAX_VALUE;
+        return Integer.MIN_VALUE;
     }
 }

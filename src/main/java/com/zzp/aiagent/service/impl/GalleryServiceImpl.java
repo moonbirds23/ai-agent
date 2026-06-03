@@ -4,22 +4,24 @@ import com.zzp.aiagent.common.ThrowUtils;
 import com.zzp.aiagent.exception.BusinessException;
 import com.zzp.aiagent.exception.ErrorCode;
 import com.zzp.aiagent.domain.gallery.GalleryImportUrlRequest;
+import com.zzp.aiagent.domain.gallery.GalleryPageResult;
 import com.zzp.aiagent.model.entity.GalleryPicture;
 import com.zzp.aiagent.domain.gallery.GalleryQueryRequest;
 import com.zzp.aiagent.domain.gallery.GalleryUploadRequest;
 import com.zzp.aiagent.model.enums.StorageLocation;
 import com.zzp.aiagent.service.GalleryService;
 import com.zzp.aiagent.service.ImageDownloadService;
-import com.zzp.aiagent.event.GalleryPictureSavedEvent;
+import com.zzp.aiagent.service.PictureAiProfileService;
 import com.zzp.aiagent.model.dto.image.DownloadedImage;
 import com.zzp.aiagent.repository.GalleryPictureRepository;
 import com.zzp.aiagent.manager.ObjectStorageService;
 import com.zzp.aiagent.domain.storage.StoredObject;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
@@ -27,13 +29,9 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.time.LocalDateTime;
-import java.util.ArrayList;
 import java.util.Base64;
-import java.util.Collections;
 import java.util.HexFormat;
 import java.util.List;
-import java.util.stream.Collectors;
 
 @Profile("!test")
 @Service
@@ -43,16 +41,16 @@ public class GalleryServiceImpl implements GalleryService {
     private final GalleryPictureRepository repository;
     private final ImageDownloadService imageDownloadService;
     private final ObjectStorageService storageService;
-    private final ApplicationEventPublisher eventPublisher;
+    private final PictureAiProfileService profileService;
 
     public GalleryServiceImpl(GalleryPictureRepository repository,
                               ImageDownloadService imageDownloadService,
                               ObjectStorageService storageService,
-                              ApplicationEventPublisher eventPublisher) {
+                              PictureAiProfileService profileService) {
         this.repository = repository;
         this.imageDownloadService = imageDownloadService;
         this.storageService = storageService;
-        this.eventPublisher = eventPublisher;
+        this.profileService = profileService;
     }
 
     @Override
@@ -82,30 +80,19 @@ public class GalleryServiceImpl implements GalleryService {
 
         String storageLocation = request.storageLocation() != null
                 ? request.storageLocation() : StorageLocation.MAIN;
-        GalleryPicture picture = new GalleryPicture(
-                null,                          // id -> assigned by repository
-                null,                          // url -> set after saving
-                null,                          // thumbnailUrl
-                request.name(),
-                request.introduction(),
-                request.category(),
-                request.tags() != null ? new ArrayList<>(request.tags()) : Collections.emptyList(),
-                (long) decoded.bytes().length, // picSize
-                meta.width(),
-                meta.height(),
-                meta.scale(),
-                ext,                           // picFormat
-                1L,                            // userId
-                0L,                            // spaceId
-                1,                             // reviewStatus
-                null,                          // picColor
-                "upload",                      // sourceType
-                request.favorited() != null ? request.favorited() : false,
-                LocalDateTime.now(),
-                LocalDateTime.now(),
+        GalleryPicture picture = GalleryPicture.forUpload(
+                request.name(), request.introduction(), request.category(),
+                request.tags(),
+                (long) decoded.bytes().length,
+                meta.width(), meta.height(), meta.scale(),
+                ext,
+                "upload",
                 storageLocation,
                 picHash
         );
+        if (request.favorited() != null) {
+            picture = picture.withFavorite(request.favorited());
+        }
 
         GalleryPicture saved = repository.save(picture);
 
@@ -115,22 +102,16 @@ public class GalleryServiceImpl implements GalleryService {
                 contentTypeFromExt(ext));
 
         // Update url from storage service
-        GalleryPicture withUrl = new GalleryPicture(
-                saved.id(), stored.url(), saved.thumbnailUrl(), saved.name(),
-                saved.introduction(), saved.category(), saved.tags(),
-                saved.picSize(), saved.picWidth(), saved.picHeight(),
-                saved.picScale(), saved.picFormat(), saved.userId(),
-                saved.spaceId(), saved.reviewStatus(), saved.picColor(),
-                saved.sourceType(), saved.favorited(),
-                saved.createTime(), saved.updateTime(),
-                saved.storageLocation(),
-                saved.picHash()
-        );
+        GalleryPicture withUrl = saved.withUrl(stored.url());
         repository.save(withUrl);
 
         log.info("[GalleryService] 上传成功 id={} name={} size={} format={}",
                 saved.id(), saved.name(), saved.picSize(), ext);
-        eventPublisher.publishEvent(new GalleryPictureSavedEvent(withUrl, decoded.bytes(), contentTypeFromExt(ext), request.imageBase64()));
+        try {
+            profileService.analyzeDirectWithBase64(withUrl, request.imageBase64(), contentTypeFromExt(ext));
+        } catch (Exception e) {
+            log.warn("[GalleryService] 自动画像分析失败 pictureId={}, 标记为待重试", saved.id(), e);
+        }
         return withUrl;
     }
 
@@ -156,27 +137,13 @@ public class GalleryServiceImpl implements GalleryService {
         ImageMeta meta = readImageMeta(downloaded.bytes(), downloaded.contentType());
         String ext = extFromContentType(downloaded.contentType());
 
-        GalleryPicture picture = new GalleryPicture(
-                null,
-                null,
-                null,
-                request.name(),
-                request.introduction(),
-                request.category(),
-                request.tags() != null ? new ArrayList<>(request.tags()) : Collections.emptyList(),
+        GalleryPicture picture = GalleryPicture.forUpload(
+                request.name(), request.introduction(), request.category(),
+                request.tags(),
                 (long) downloaded.bytes().length,
-                meta.width(),
-                meta.height(),
-                meta.scale(),
+                meta.width(), meta.height(), meta.scale(),
                 ext,
-                1L,
-                0L,
-                1,
-                null,
                 "import_url",
-                false,
-                LocalDateTime.now(),
-                LocalDateTime.now(),
                 StorageLocation.MAIN,
                 picHash
         );
@@ -187,68 +154,34 @@ public class GalleryServiceImpl implements GalleryService {
         StoredObject stored = storageService.upload(downloaded.bytes(), key,
                 contentTypeFromExt(ext));
 
-        GalleryPicture withUrl = new GalleryPicture(
-                saved.id(), stored.url(), saved.thumbnailUrl(), saved.name(),
-                saved.introduction(), saved.category(), saved.tags(),
-                saved.picSize(), saved.picWidth(), saved.picHeight(),
-                saved.picScale(), saved.picFormat(), saved.userId(),
-                saved.spaceId(), saved.reviewStatus(), saved.picColor(),
-                saved.sourceType(), saved.favorited(),
-                saved.createTime(), saved.updateTime(),
-                saved.storageLocation(),
-                saved.picHash()
-        );
+        GalleryPicture withUrl = saved.withUrl(stored.url());
         repository.save(withUrl);
 
         log.info("[GalleryService] URL导入成功 id={} name={} url={}",
                 saved.id(), saved.name(), request.imageUrl());
-        eventPublisher.publishEvent(new GalleryPictureSavedEvent(withUrl, downloaded.bytes(), downloaded.contentType(), null));
+        try {
+            profileService.analyzeDirect(withUrl, downloaded.bytes(), downloaded.contentType());
+        } catch (Exception e) {
+            log.warn("[GalleryService] 自动画像分析失败 pictureId={}, 标记为待重试", saved.id(), e);
+        }
         return withUrl;
     }
 
     @Override
-    public List<GalleryPicture> listAll(GalleryQueryRequest request) {
-        List<GalleryPicture> all = repository.findAll();
-
+    public GalleryPageResult listAll(GalleryQueryRequest request) {
         int page = request.page() != null && request.page() > 0 ? request.page() : 1;
         int pageSize = request.pageSize() != null && request.pageSize() > 0 ? request.pageSize() : 20;
+        if (pageSize > 100) pageSize = 100;
 
-        // Filtering
-        if (request.keyword() != null && !request.keyword().isBlank()) {
-            String kw = request.keyword().toLowerCase();
-            all = all.stream()
-                    .filter(p -> (p.name() != null && p.name().toLowerCase().contains(kw))
-                            || (p.introduction() != null && p.introduction().toLowerCase().contains(kw)))
-                    .collect(Collectors.toList());
-        }
-        if (request.category() != null && !request.category().isBlank()) {
-            all = all.stream()
-                    .filter(p -> request.category().equals(p.category()))
-                    .collect(Collectors.toList());
-        }
-        if (request.tags() != null && !request.tags().isEmpty()) {
-            all = all.stream()
-                    .filter(p -> p.tags() != null && !Collections.disjoint(p.tags(), request.tags()))
-                    .collect(Collectors.toList());
-        }
-        if (request.favoritedOnly() != null && request.favoritedOnly()) {
-            all = all.stream()
-                    .filter(p -> Boolean.TRUE.equals(p.favorited()))
-                    .collect(Collectors.toList());
-        }
-        if (request.sourceType() != null && !request.sourceType().isBlank()) {
-            all = all.stream()
-                    .filter(p -> request.sourceType().equals(p.sourceType()))
-                    .collect(Collectors.toList());
-        }
+        int offset = (page - 1) * pageSize;
+        List<GalleryPicture> records = repository.findAllPaged(
+                offset, pageSize, request.keyword(), request.category(),
+                request.tags(), request.favoritedOnly(), request.sourceType());
+        long total = repository.countFiltered(
+                request.keyword(), request.category(), request.tags(),
+                request.favoritedOnly(), request.sourceType());
 
-        // Paginate
-        int from = (page - 1) * pageSize;
-        if (from >= all.size()) {
-            return Collections.emptyList();
-        }
-        int to = Math.min(from + pageSize, all.size());
-        return all.subList(from, to);
+        return new GalleryPageResult(records, total, page, pageSize);
     }
 
     @Override
@@ -267,25 +200,32 @@ public class GalleryServiceImpl implements GalleryService {
     @Override
     public GalleryPicture favorite(Long id, boolean favorited) {
         GalleryPicture existing = getById(id);
-        GalleryPicture updated = new GalleryPicture(
-                existing.id(), existing.url(), existing.thumbnailUrl(), existing.name(),
-                existing.introduction(), existing.category(), existing.tags(),
-                existing.picSize(), existing.picWidth(), existing.picHeight(),
-                existing.picScale(), existing.picFormat(), existing.userId(),
-                existing.spaceId(), existing.reviewStatus(), existing.picColor(),
-                existing.sourceType(), favorited,
-                existing.createTime(), LocalDateTime.now(),
-                existing.storageLocation(),
-                existing.picHash()
-        );
+        GalleryPicture updated = existing.withFavorite(favorited);
         return repository.save(updated);
     }
 
     @Override
+    @Transactional
     public void delete(Long id) {
         GalleryPicture existing = getById(id);
+
+        // 删除向量索引 + 画像数据
+        try {
+            profileService.removeIndex(id);
+        } catch (Exception e) {
+            log.warn("[GalleryService] 删除画像/向量失败 pictureId={}, 继续删除图库记录", id, e);
+        }
+
         repository.deleteById(id);
-        storageService.delete(existing.storageKey());
+
+        // 事务提交后再删对象存储文件，避免删了文件但事务回滚导致数据不一致
+        String storageKey = existing.storageKey();
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                storageService.delete(storageKey);
+            }
+        });
 
         log.info("[GalleryService] 删除成功 id={}", id);
     }
@@ -293,20 +233,9 @@ public class GalleryServiceImpl implements GalleryService {
     @Override
     public byte[] downloadPicture(Long pictureId) {
         GalleryPicture picture = getById(pictureId);
-        byte[] bytes = null;
-        String[] tryExts = {picture.picFormat(), "png", "jpg", "jpeg", "webp", "gif", "bmp"};
-        for (String tryExt : tryExts) {
-            if (tryExt == null || tryExt.isBlank()) continue;
-            try {
-                bytes = storageService.download(picture.storageKey());
-                if (bytes != null && bytes.length > 0) return bytes;
-            } catch (Exception ignored) {
-            }
-        }
-        if (bytes == null || bytes.length == 0) {
-            throw new BusinessException(ErrorCode.GALLERY_OPERATION_FAILED, "图片文件不存在: " + pictureId);
-        }
-        return bytes;
+        byte[] bytes = storageService.download(picture.storageKey());
+        if (bytes != null && bytes.length > 0) return bytes;
+        throw new BusinessException(ErrorCode.GALLERY_OPERATION_FAILED, "图片文件不存在: " + pictureId);
     }
 
     @Override

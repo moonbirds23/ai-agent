@@ -92,6 +92,7 @@ class RagServiceImplTest {
         when(hybridRetriever.retrieve(any())).thenReturn(Collections.emptyList());
         when(reranker.rerank(any(), any())).thenReturn(Collections.emptyList());
 
+        when(ragProperties.enabled()).thenReturn(true);
         when(ragProperties.topK()).thenReturn(5);
         when(ragProperties.minScore()).thenReturn(0.4);
         when(ragProperties.retrieveFavoritesOnly()).thenReturn(true);

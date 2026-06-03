@@ -4,8 +4,12 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zzp.aiagent.exception.BusinessException;
 import com.zzp.aiagent.exception.ErrorCode;
+import com.zzp.aiagent.model.dto.image.DownloadedImage;
 import com.zzp.aiagent.model.dto.image.VisionAnalysisResult;
+import com.zzp.aiagent.service.ImageDownloadService;
 import com.zzp.aiagent.service.VisionAnalysisService;
+import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
+import io.github.resilience4j.retry.annotation.Retry;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.web.client.RestTemplateBuilder;
@@ -18,6 +22,7 @@ import org.springframework.web.client.HttpStatusCodeException;
 import org.springframework.web.client.RestTemplate;
 
 import java.time.Duration;
+import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 
@@ -32,13 +37,15 @@ public class ZhipuVisionAnalysisService implements VisionAnalysisService {
     private final String model;
     private final RestTemplate restTemplate;
     private final ObjectMapper mapper;
+    private final ImageDownloadService imageDownloadService;
 
     public ZhipuVisionAnalysisService(@Value("${zhipu.vision.api-key:}") String visionApiKey,
                                       @Value("${zhipu.api-key:}") String apiKey,
                                       @Value("${zhipu.image.api-key:}") String imageApiKey,
                                       @Value("${zhipu.vision.model:glm-4.5v}") String model,
                                       RestTemplateBuilder builder,
-                                      ObjectMapper mapper) {
+                                      ObjectMapper mapper,
+                                      ImageDownloadService imageDownloadService) {
         this.apiKey = firstNonBlank(visionApiKey, apiKey, imageApiKey);
         this.model = model;
         this.restTemplate = builder
@@ -46,14 +53,25 @@ public class ZhipuVisionAnalysisService implements VisionAnalysisService {
                 .readTimeout(Duration.ofSeconds(120))
                 .build();
         this.mapper = mapper;
+        this.imageDownloadService = imageDownloadService;
     }
 
     @Override
+    @CircuitBreaker(name = "zhipu-vision")
+    @Retry(name = "zhipu-vision")
     public VisionAnalysisResult analyze(String message, String imageBase64, String imageUrl) {
         if (apiKey == null || apiKey.isBlank()) {
             throw new BusinessException(ErrorCode.AI_AUTH_FAILED, "智谱视觉 API Key 未配置");
         }
-        String image = imageUrl != null && !imageUrl.isBlank() ? imageUrl : normalizeImageBase64(imageBase64);
+        String image;
+        if (imageUrl != null && !imageUrl.isBlank()) {
+            DownloadedImage downloaded = imageDownloadService.download(imageUrl);
+            String base64 = Base64.getEncoder().encodeToString(downloaded.bytes());
+            String mimeType = downloaded.contentType() != null ? downloaded.contentType() : "image/png";
+            image = "data:" + mimeType + ";base64," + base64;
+        } else {
+            image = normalizeImageBase64(imageBase64);
+        }
         if (image == null || image.isBlank()) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR, "请先上传需要分析的图片");
         }
@@ -74,8 +92,8 @@ public class ZhipuVisionAnalysisService implements VisionAnalysisService {
                 "temperature", 0.2
         );
 
-        log.info("[ZhipuVision] 开始分析图片 model={} hasUrl={} messageLen={}",
-                model, imageUrl != null && !imageUrl.isBlank(), message == null ? 0 : message.length());
+        log.info("[ZhipuVision] 开始分析图片 model={} messageLen={}",
+                model, message == null ? 0 : message.length());
         HttpEntity<Map<String, Object>> entity = new HttpEntity<>(body, headers);
 
         try {
@@ -96,7 +114,16 @@ public class ZhipuVisionAnalysisService implements VisionAnalysisService {
         } catch (HttpStatusCodeException e) {
             String messageText = extractErrorMessage(e.getResponseBodyAsString());
             log.warn("[ZhipuVision] API请求失败 status={} message={}", e.getStatusCode(), messageText);
-            throw new BusinessException(ErrorCode.IMAGE_ANALYSIS_FAILED, "图片分析失败: " + messageText);
+            int status = e.getStatusCode().value();
+            if (status == 429) {
+                throw new BusinessException(ErrorCode.AI_RATE_LIMIT, "AI 服务请求过于频繁");
+            } else if (status == 503) {
+                throw new BusinessException(ErrorCode.AI_MODEL_UNAVAILABLE, "AI 模型暂不可用");
+            } else if (status >= 400 && status < 500) {
+                throw new BusinessException(ErrorCode.PARAMS_ERROR, "图片分析失败: " + messageText);
+            } else {
+                throw new BusinessException(ErrorCode.IMAGE_ANALYSIS_FAILED, "图片分析失败: " + messageText);
+            }
         } catch (Exception e) {
             log.error("[ZhipuVision] 图片分析异常", e);
             throw new BusinessException(ErrorCode.IMAGE_ANALYSIS_FAILED, "图片分析失败，请稍后重试");

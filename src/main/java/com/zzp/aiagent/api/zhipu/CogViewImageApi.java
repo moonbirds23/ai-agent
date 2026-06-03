@@ -5,6 +5,7 @@ import com.zzp.aiagent.exception.BusinessException;
 import com.zzp.aiagent.exception.ErrorCode;
 import com.zzp.aiagent.model.dto.image.DownloadedImage;
 import com.zzp.aiagent.service.ImageDownloadService;
+import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
@@ -36,6 +37,7 @@ public class CogViewImageApi implements ImageDownloadService {
     }
 
     @Override
+    @CircuitBreaker(name = "zhipu-image-download")
     public DownloadedImage download(String imageUrl) {
         return download(validateUri(imageUrl), 0);
     }

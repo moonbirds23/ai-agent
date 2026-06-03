@@ -5,10 +5,10 @@ import com.zzp.aiagent.exception.BusinessException;
 import com.zzp.aiagent.exception.ErrorCode;
 import com.zzp.aiagent.service.ImageGenerationService;
 import com.zzp.aiagent.service.VisionAnalysisService;
-import com.zzp.aiagent.domain.gallery.GalleryProperties;
+import com.zzp.aiagent.service.ChatMediaService;
+import com.zzp.aiagent.service.ConversationLimitService;
 import com.zzp.aiagent.service.GalleryService;
-import com.zzp.aiagent.repository.ChatHistoryRepository;
-import com.zzp.aiagent.memory.ChatMemoryProperties;
+import com.zzp.aiagent.service.impl.ChatMediaServiceImpl;
 import com.zzp.aiagent.service.impl.ChatServiceImpl;
 import com.zzp.aiagent.service.impl.PromptReferenceAssembler;
 import com.zzp.aiagent.service.RagService;
@@ -61,9 +61,8 @@ class PictureAppMultimodalTest {
     private RagService ragService;
     private PromptReferenceAssembler assembler;
     private GalleryService galleryService;
-    private ChatHistoryRepository chatHistoryRepo;
-    private ChatMemoryProperties chatMemoryProps;
-    private GalleryProperties galleryProps;
+    private ChatMediaService chatMediaService;
+    private ConversationLimitService conversationLimitService;
     private ChatServiceImpl chatService;
 
     @BeforeEach
@@ -74,9 +73,8 @@ class PictureAppMultimodalTest {
         ragService = mock(RagService.class);
         assembler = mock(PromptReferenceAssembler.class);
         galleryService = mock(GalleryService.class);
-        chatHistoryRepo = mock(ChatHistoryRepository.class);
-        chatMemoryProps = new ChatMemoryProperties(50, 7, 200);
-        galleryProps = new GalleryProperties(7, "0 0 3 * * ?");
+        chatMediaService = new ChatMediaServiceImpl(galleryService);
+        conversationLimitService = mock(ConversationLimitService.class);
         when(ragService.buildContext(any())).thenReturn(com.zzp.aiagent.domain.rag.RagContext.empty());
         when(assembler.assemble(any(), any())).thenAnswer(inv -> inv.getArgument(0));
         chatService = new ChatServiceImpl(chatModel, MessageWindowChatMemory.builder()
@@ -85,7 +83,7 @@ class PictureAppMultimodalTest {
                 .build(), new PromptTemplate(),
                 new com.fasterxml.jackson.databind.ObjectMapper(),
                 imageGenService, visionAnalysisService, ragService, assembler, galleryService,
-                chatHistoryRepo, chatMemoryProps, galleryProps);
+                chatMediaService, conversationLimitService);
     }
 
     private static String jsonChat(String message) {

@@ -1,11 +1,10 @@
 package com.zzp.aiagent.service;
 
-import com.zzp.aiagent.domain.rag.RagCandidate;
-import com.zzp.aiagent.domain.rag.RagSearchCriteria;
-
-import java.util.List;
-
-public interface HybridGalleryRetriever {
-
-    List<RagCandidate> retrieve(RagSearchCriteria criteria);
+/**
+ * Hybrid (vector + keyword + metadata) gallery reference retriever.
+ * Extends {@link ReferenceRetriever} — the single {@code retrieve()} method
+ * is inherited from the parent interface.
+ */
+public interface HybridGalleryRetriever extends ReferenceRetriever {
+    // All retriever contract methods are inherited from ReferenceRetriever.
 }

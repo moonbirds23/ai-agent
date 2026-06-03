@@ -3,10 +3,10 @@ package com.zzp.aiagent.app;
 import com.zzp.aiagent.utils.PromptTemplate;
 import com.zzp.aiagent.service.ImageGenerationService;
 import com.zzp.aiagent.service.VisionAnalysisService;
-import com.zzp.aiagent.domain.gallery.GalleryProperties;
+import com.zzp.aiagent.service.ChatMediaService;
+import com.zzp.aiagent.service.ConversationLimitService;
 import com.zzp.aiagent.service.GalleryService;
-import com.zzp.aiagent.repository.ChatHistoryRepository;
-import com.zzp.aiagent.memory.ChatMemoryProperties;
+import com.zzp.aiagent.service.impl.ChatMediaServiceImpl;
 import com.zzp.aiagent.service.impl.ChatServiceImpl;
 import com.zzp.aiagent.service.impl.PromptReferenceAssembler;
 import com.zzp.aiagent.service.RagService;
@@ -58,16 +58,15 @@ class PictureAppMultiTurnTest {
         PromptReferenceAssembler assembler = mock(PromptReferenceAssembler.class);
         when(assembler.assemble(any(), any())).thenAnswer(inv -> inv.getArgument(0));
         GalleryService galleryService = mock(GalleryService.class);
-        ChatHistoryRepository chatHistoryRepo = mock(ChatHistoryRepository.class);
-        ChatMemoryProperties chatMemoryProps = new ChatMemoryProperties(50, 7, 200);
-        GalleryProperties galleryProps = new GalleryProperties(7, "0 0 3 * * ?");
+        ChatMediaService chatMediaService = new ChatMediaServiceImpl(galleryService);
+        ConversationLimitService conversationLimitService = mock(ConversationLimitService.class);
         chatService = new ChatServiceImpl(chatModel, MessageWindowChatMemory.builder()
                 .chatMemoryRepository(new InMemoryChatMemoryRepository())
                 .maxMessages(100)
                 .build(), new PromptTemplate(),
                 new com.fasterxml.jackson.databind.ObjectMapper(),
                 mock(ImageGenerationService.class), mock(VisionAnalysisService.class), ragService, assembler,
-                galleryService, chatHistoryRepo, chatMemoryProps, galleryProps);
+                galleryService, chatMediaService, conversationLimitService);
     }
 
     private static ChatRequest req(String message) {

@@ -2,6 +2,8 @@ package com.zzp.aiagent.repository.impl;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.zzp.aiagent.exception.BusinessException;
+import com.zzp.aiagent.exception.ErrorCode;
 import com.zzp.aiagent.model.entity.GalleryPicture;
 import com.zzp.aiagent.model.enums.StorageLocation;
 import com.zzp.aiagent.repository.GalleryPictureRepository;
@@ -28,18 +30,19 @@ public class PostgresGalleryPictureRepository implements GalleryPictureRepositor
     private final NamedParameterJdbcTemplate jdbc;
     private final ObjectMapper mapper;
 
+    private final RowMapper<GalleryPicture> ROW_MAPPER;
+
     public PostgresGalleryPictureRepository(NamedParameterJdbcTemplate jdbc, ObjectMapper mapper) {
         this.jdbc = jdbc;
         this.mapper = mapper;
-    }
-
-    private static final RowMapper<GalleryPicture> ROW_MAPPER = (rs, rowNum) -> {
+        this.ROW_MAPPER = (rs, rowNum) -> {
         List<String> tags = Collections.emptyList();
         String tagsJson = rs.getString("tags");
         if (tagsJson != null && !tagsJson.isBlank()) {
             try {
-                tags = new ObjectMapper().readValue(tagsJson, new TypeReference<List<String>>() {});
-            } catch (Exception ignored) {
+                tags = mapper.readValue(tagsJson, new TypeReference<List<String>>() {});
+            } catch (Exception e) {
+                log.error("[PostgresRepo] tags JSON解析失败 id={}: {}", rs.getLong("id"), e.getMessage());
             }
         }
         return new GalleryPicture(
@@ -65,8 +68,9 @@ public class PostgresGalleryPictureRepository implements GalleryPictureRepositor
                 rs.getTimestamp("update_time") != null ? rs.getTimestamp("update_time").toLocalDateTime() : null,
                 rs.getString("storage_location"),
                 rs.getString("pic_hash")
-        );
-    };
+            );
+        };
+    }
 
     @Override
     public GalleryPicture save(GalleryPicture picture) {
@@ -83,10 +87,11 @@ public class PostgresGalleryPictureRepository implements GalleryPictureRepositor
                     :picFormat, :userId, :spaceId, :reviewStatus, :picColor, :sourceType, :favorited,
                     :storageLocation, :picHash)
                 """;
-        String tagsJson = null;
+        String tagsJson;
         try {
             tagsJson = mapper.writeValueAsString(picture.tags());
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            throw new BusinessException(ErrorCode.GALLERY_OPERATION_FAILED, "tags JSON序列化失败: " + e.getMessage());
         }
         MapSqlParameterSource params = baseParams(picture)
                 .addValue("tags", tagsJson);
@@ -107,10 +112,11 @@ public class PostgresGalleryPictureRepository implements GalleryPictureRepositor
                     storage_location=:storageLocation, update_time=now()
                 WHERE id=:id AND is_delete=0
                 """;
-        String tagsJson = null;
+        String tagsJson;
         try {
             tagsJson = mapper.writeValueAsString(picture.tags());
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            throw new BusinessException(ErrorCode.GALLERY_OPERATION_FAILED, "tags JSON序列化失败: " + e.getMessage());
         }
         MapSqlParameterSource params = baseParams(picture).addValue("tags", tagsJson);
         jdbc.update(sql, params);
@@ -188,6 +194,60 @@ public class PostgresGalleryPictureRepository implements GalleryPictureRepositor
         return jdbc.query(sql,
                 new MapSqlParameterSource("cutoffTime", Timestamp.valueOf(cutoffTime)),
                 ROW_MAPPER);
+    }
+
+    @Override
+    public List<GalleryPicture> findAllPaged(int offset, int limit, String keyword, String category,
+                                              List<String> tags, Boolean favoritedOnly, String sourceType) {
+        WhereClause wc = buildWhereClause(keyword, category, tags, favoritedOnly, sourceType);
+        String sql = "SELECT * FROM gallery_picture" + wc.sql()
+                + " ORDER BY create_time DESC LIMIT :limit OFFSET :offset";
+        wc.params().addValue("limit", limit).addValue("offset", offset);
+        return jdbc.query(sql, wc.params(), ROW_MAPPER);
+    }
+
+    @Override
+    public int countFiltered(String keyword, String category, List<String> tags,
+                              Boolean favoritedOnly, String sourceType) {
+        WhereClause wc = buildWhereClause(keyword, category, tags, favoritedOnly, sourceType);
+        String sql = "SELECT COUNT(*) FROM gallery_picture" + wc.sql();
+        Integer result = jdbc.queryForObject(sql, wc.params(), Integer.class);
+        return result != null ? result : 0;
+    }
+
+    private record WhereClause(String sql, MapSqlParameterSource params) {}
+
+    private WhereClause buildWhereClause(String keyword, String category, List<String> tags,
+                                          Boolean favoritedOnly, String sourceType) {
+        StringBuilder where = new StringBuilder(" WHERE is_delete = 0");
+        MapSqlParameterSource params = new MapSqlParameterSource();
+
+        if (keyword != null && !keyword.isBlank()) {
+            where.append(" AND (name ILIKE :keywordLike OR introduction ILIKE :keywordLike)");
+            params.addValue("keywordLike", "%" + keyword + "%");
+        }
+        if (category != null && !category.isBlank()) {
+            where.append(" AND category = :category");
+            params.addValue("category", category);
+        }
+        if (tags != null && !tags.isEmpty()) {
+            where.append(" AND tags::jsonb ?| ARRAY[");
+            for (int i = 0; i < tags.size(); i++) {
+                if (i > 0) where.append(", ");
+                where.append(":tag").append(i);
+                params.addValue("tag" + i, tags.get(i));
+            }
+            where.append("]");
+        }
+        if (favoritedOnly != null && favoritedOnly) {
+            where.append(" AND favorited = TRUE");
+        }
+        if (sourceType != null && !sourceType.isBlank()) {
+            where.append(" AND source_type = :sourceType");
+            params.addValue("sourceType", sourceType);
+        }
+
+        return new WhereClause(where.toString(), params);
     }
 
     private MapSqlParameterSource baseParams(GalleryPicture p) {

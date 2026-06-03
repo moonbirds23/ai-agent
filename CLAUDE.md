@@ -274,6 +274,9 @@ Advisor 内抛 `BusinessException` → `ExceptionGuardAdvisor`（order=MAX）兜
 | **智谱 embedding-2 相似度偏低** | 语义相关内容余弦相似度通常 0.4~0.5，`min-score` 设 0.4 较为合理，0.65 过严会导致大量漏召回 |
 | **GalleryPicture 24 字段 record** | 加字段影响 N 处 `new GalleryPicture(...)` 构造点（Service/Repository/测试）。record 有 compact constructor：`if (storageLocation == null) storageLocation = StorageLocation.MAIN`，旧 JSON 数据无此字段反序列化为 null 后自动兜底 |
 | **@EnableScheduling 已启用** | `AiAgentApplication` 已加 `@EnableScheduling`，`GalleryCacheCleanupTask` 通过 `@Scheduled(cron)` 每日清理过期缓存图。test profile 通过 `@Profile("!test")` 排除定时任务，无需额外配置 |
+| **同一张图调两次视觉模型** | `image_generation` 模式下：① `autoSaveToCacheGallery()` 发异步事件 → `PictureAutoAnalysisListener` 调 vision 写画像；② `prepareRagContext()` 同步调 vision 取检索 query。同一张图、同一个 `glm-4.5v` 模型，调了两次，仅 prompt 不同。② 本身就是同步阻塞的，不如合并为一次调用，结果复用给 RAG 检索和画像存储 |
+| **@Async 事件模式导致分析结果不可复用** | `PictureAutoAnalysisListener` 异步执行，画像结果对当前请求不可见。如果后续有更多模块需要视觉分析结果（内容审核、自动标签等），按此模式每个都要独立调 LLM。正确做法：入库后同步做一次视觉分析，结果共享给所有消费者 |
+| **CogView-4 仅支持文生图，RAG 本质是 Prompt 增强器** | CogView-4 API 只接受 `prompt` 字符串，无 `image`/`reference_image` 参数。智谱 `/images/generations` 端点没有图生图能力（无 `/images/edits` 或 `/images/variations`）。GLM-Image 模型层面支持图生图但 API 未开放。当前 RAG 链路是"图片→视觉提取文字→RAG 文字检索→拼 Prompt→文生图"，不是真正的图生图 |
 
 ## 多模态架构
 
@@ -372,7 +375,7 @@ public interface ImageGenerationService {
 - [x] Rerank 权重可配置化（P2: 权重提升为 RagProperties 属性，yml 可调 vector/keyword/metadata 权重）
 - [x] Query Rewrite 透传对话历史（P4: RagServiceImpl 注入 ChatMemory，取最近 20 条消息拼接 history 传给 rewrite 服务）
 - [x] 图→图检索支持（P3: 上传参考图 + 空文本时，调视觉模型提取视觉特征作为 RAG 检索 query）
-- [ ] 真实生图 API 接入（DALL·E / SD，接口已预留）
+- [ ] 真实图生图 API 接入（计划接腾讯混元生图，支持图片参考输入，实现真正的图生图；智谱 CogView-4 仅文生图，GLM-Image 图生图 API 未开放）
 - [x] 旧 knowledge/ 模块清理
 - [x] **Spring AI 1.0.0 GA 升级**（M6→GA，BOM 统一依赖管理，Advisor/ChatMemory/ChatClient API 全量迁移）
 - [x] **PostgreSQL 落库**（Flyway V1-V2 迁移脚本，`PostgresGalleryPictureRepository` + `PostgresPictureAiProfileRepository`，`@Profile("postgres")` 切换）

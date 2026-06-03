@@ -26,11 +26,17 @@ public class RagRerankerImpl implements RagReranker {
             return List.of();
         }
 
+        // Min-max normalize each dimension across the batch to unify scale
+        double maxVector = candidates.stream().mapToDouble(RagCandidate::vectorScore).max().orElse(1.0);
+        double maxKeyword = candidates.stream().mapToDouble(RagCandidate::keywordScore).max().orElse(1.0);
+        double maxMetadata = candidates.stream().mapToDouble(RagCandidate::metadataScore).max().orElse(1.0);
+
         return candidates.stream()
                 .map(c -> {
-                    double finalScore = c.vectorScore() * ragProperties.vectorWeight()
-                            + c.keywordScore() * ragProperties.keywordWeight()
-                            + c.metadataScore() * ragProperties.metadataWeight();
+                    double finalScore =
+                            (c.vectorScore() / Math.max(maxVector, 1.0)) * ragProperties.vectorWeight()
+                            + (c.keywordScore() / Math.max(maxKeyword, 1.0)) * ragProperties.keywordWeight()
+                            + (c.metadataScore() / Math.max(maxMetadata, 1.0)) * ragProperties.metadataWeight();
                     List<String> reasons = buildReasons(c, finalScore);
                     return new RagCandidate(c.picture(), c.profile(),
                             c.vectorScore(), c.keywordScore(), c.metadataScore(),

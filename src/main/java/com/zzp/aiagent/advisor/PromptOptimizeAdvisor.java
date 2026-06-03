@@ -56,9 +56,10 @@ public class PromptOptimizeAdvisor implements CallAdvisor, StreamAdvisor {
         String optimized = promptTemplate.render("default", "optimize", "userInput", original);
 
         List<Message> messages = new ArrayList<>(request.prompt().getInstructions());
-        for (int i = 0; i < messages.size(); i++) {
+        for (int i = messages.size() - 1; i >= 0; i--) {
             if (messages.get(i) instanceof UserMessage um) {
                 messages.set(i, UserMessage.builder().text(optimized).media(um.getMedia()).build());
+                break;
             }
         }
         Prompt newPrompt = new Prompt(messages, request.prompt().getOptions());

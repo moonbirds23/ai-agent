@@ -1,5 +1,6 @@
 package com.zzp.aiagent.advisor;
 
+import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.ChatClientRequest;
 import org.springframework.ai.chat.client.ChatClientResponse;
 import org.springframework.ai.chat.client.advisor.api.CallAdvisor;
@@ -27,6 +28,16 @@ public class RagInjectionAdvisor implements CallAdvisor, StreamAdvisor {
 
     public static final String KEY_RAG_AUGMENTED = "ragAugmentedText";
 
+    /**
+     * Convenience method for callers to set the augmented text parameter
+     * without referencing the string constant directly.
+     */
+    public static void applyAugmentation(ChatClient.AdvisorSpec spec, String augmentedText) {
+        if (augmentedText != null && !augmentedText.isBlank()) {
+            spec.param(KEY_RAG_AUGMENTED, augmentedText);
+        }
+    }
+
     @Override
     public ChatClientResponse adviseCall(ChatClientRequest request, CallAdvisorChain chain) {
         ChatClientRequest enhanced = injectRagText(request);
@@ -50,11 +61,12 @@ public class RagInjectionAdvisor implements CallAdvisor, StreamAdvisor {
             return request;
         }
 
-        // Replace user message text with RAG-augmented version, preserving media attachments
+        // Replace only the last UserMessage (current turn), preserving media attachments
         List<Message> messages = new ArrayList<>(request.prompt().getInstructions());
-        for (int i = 0; i < messages.size(); i++) {
+        for (int i = messages.size() - 1; i >= 0; i--) {
             if (messages.get(i) instanceof UserMessage um) {
                 messages.set(i, UserMessage.builder().text(augmentedText).media(um.getMedia()).build());
+                break;
             }
         }
         Prompt newPrompt = new Prompt(messages, request.prompt().getOptions());

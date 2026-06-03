@@ -109,8 +109,8 @@ public class JdbcChatHistoryRepository implements ChatHistoryRepository {
         try {
             return mapper.writeValueAsString(obj);
         } catch (Exception e) {
-            log.warn("[ChatHistoryRepo] JSON序列化失败: {}", e.getMessage());
-            return null;
+            log.error("[ChatHistoryRepo] JSON序列化失败: {}", e.getMessage());
+            throw new RuntimeException("JSON序列化失败", e);
         }
     }
 }
