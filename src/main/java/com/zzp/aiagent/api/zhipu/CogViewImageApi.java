@@ -1,6 +1,7 @@
 package com.zzp.aiagent.api.zhipu;
 
 import com.zzp.aiagent.common.ThrowUtils;
+import com.zzp.aiagent.common.UrlSecurityValidator;
 import com.zzp.aiagent.exception.BusinessException;
 import com.zzp.aiagent.exception.ErrorCode;
 import com.zzp.aiagent.model.dto.image.DownloadedImage;
@@ -10,10 +11,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.io.InputStream;
-import java.net.Inet6Address;
-import java.net.InetAddress;
 import java.net.URI;
-import java.net.UnknownHostException;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -28,8 +26,10 @@ public class CogViewImageApi implements ImageDownloadService {
     private static final int MAX_REDIRECTS = 3;
 
     private final HttpClient httpClient;
+    private final UrlSecurityValidator urlSecurityValidator;
 
-    public CogViewImageApi() {
+    public CogViewImageApi(UrlSecurityValidator urlSecurityValidator) {
+        this.urlSecurityValidator = urlSecurityValidator;
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(10))
                 .followRedirects(HttpClient.Redirect.NEVER)
@@ -84,44 +84,7 @@ public class CogViewImageApi implements ImageDownloadService {
 
     private URI validateUri(String imageUrl) {
         ThrowUtils.throwIf(imageUrl == null || imageUrl.isBlank(), ErrorCode.PARAMS_ERROR, "图片地址不能为空");
-        URI uri;
-        try {
-            uri = URI.create(imageUrl.trim());
-        } catch (IllegalArgumentException e) {
-            throw new BusinessException(ErrorCode.PARAMS_ERROR, "图片地址格式错误");
-        }
-        String scheme = uri.getScheme();
-        String host = uri.getHost();
-        ThrowUtils.throwIf(!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme),
-                ErrorCode.PARAMS_ERROR, "仅支持 http/https 图片地址");
-        ThrowUtils.throwIf(host == null || host.isBlank(), ErrorCode.PARAMS_ERROR, "图片地址缺少域名");
-        validateHost(host);
-        return uri;
-    }
-
-    private void validateHost(String host) {
-        try {
-            for (InetAddress address : InetAddress.getAllByName(host)) {
-                ThrowUtils.throwIf(isUnsafeAddress(address), ErrorCode.PARAMS_ERROR, "不允许下载内网地址图片");
-            }
-        } catch (UnknownHostException e) {
-            throw new BusinessException(ErrorCode.PARAMS_ERROR, "图片地址域名无法解析");
-        }
-    }
-
-    private boolean isUnsafeAddress(InetAddress address) {
-        if (address.isAnyLocalAddress()
-                || address.isLoopbackAddress()
-                || address.isLinkLocalAddress()
-                || address.isSiteLocalAddress()
-                || address.isMulticastAddress()) {
-            return true;
-        }
-        if (address instanceof Inet6Address) {
-            byte[] bytes = address.getAddress();
-            return (bytes[0] & 0xfe) == 0xfc;
-        }
-        return false;
+        return urlSecurityValidator.validate(imageUrl.trim());
     }
 
     private String normalizeContentType(String contentType) {

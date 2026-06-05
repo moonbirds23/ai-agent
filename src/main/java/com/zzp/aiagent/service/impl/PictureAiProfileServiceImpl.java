@@ -14,6 +14,7 @@ import com.zzp.aiagent.repository.PictureAiProfileRepository;
 import com.zzp.aiagent.manager.ObjectStorageService;
 import com.zzp.aiagent.manager.VectorIndexService;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Service;
 
@@ -39,7 +40,7 @@ public class PictureAiProfileServiceImpl implements PictureAiProfileService {
                                        VectorIndexService vectorIndexService,
                                        VisionAnalysisService visionAnalysisService,
                                        ObjectMapper mapper,
-                                       GalleryService galleryService,
+                                       @Lazy GalleryService galleryService,
                                        ObjectStorageService storageService) {
         this.repository = repository;
         this.vectorIndexService = vectorIndexService;

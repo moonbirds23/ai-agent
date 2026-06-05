@@ -64,6 +64,27 @@ app:
     cache-cleanup-cron: "0 0 3 * * ?"
   vector:
     type: postgres
+  web:
+    enabled: true
+    connect-timeout-seconds: 10
+    read-timeout-seconds: 30
+    max-fetch-bytes: 2097152
+    max-download-bytes: 20971520
+    user-agent: "Mozilla/5.0 (compatible; CloudGalleryBot/1.0)"
+    search-max-results: 5
+    fetch-max-chars: 3000
+    proxy-host: ${WEB_PROXY_HOST:}
+    proxy-port: ${WEB_PROXY_PORT:0}
+    image-search-debug: false
+    image-search-async-enabled: true
+    image-search-save-debug-html: false
+    image-search-min-relevance-score: 0.15
+  pexels:
+    api-key: ${PEXELS_API_KEY:}
+    connect-timeout-seconds: 10
+    read-timeout-seconds: 30
+    search-max-results: 5
+    max-download-count: 3
 
 zhipu:
   api-key: ${ZHIPU_API_KEY:}
