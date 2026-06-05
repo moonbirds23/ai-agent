@@ -29,10 +29,8 @@ public class LoggingAdvisor implements CallAdvisor, StreamAdvisor {
     public ChatClientResponse adviseCall(ChatClientRequest request, CallAdvisorChain chain) {
         Instant start = Instant.now();
         String chatId = (String) request.context().get("chatId");
-        String originalInput = (String) request.context().get(PromptOptimizeAdvisor.KEY_ORIGINAL_INPUT);
         String actualPrompt = getUserText(request);
-
-        logRequest(chatId, "非流式", originalInput, actualPrompt);
+        logRequest(chatId, "非流式", actualPrompt);
 
         ChatClientRequest req = withStartTime(request, start);
         ChatClientResponse response = chain.nextCall(req);
@@ -45,10 +43,8 @@ public class LoggingAdvisor implements CallAdvisor, StreamAdvisor {
     public Flux<ChatClientResponse> adviseStream(ChatClientRequest request, StreamAdvisorChain chain) {
         Instant start = Instant.now();
         String chatId = (String) request.context().get("chatId");
-        String originalInput = (String) request.context().get(PromptOptimizeAdvisor.KEY_ORIGINAL_INPUT);
         String actualPrompt = getUserText(request);
-
-        logRequest(chatId, "流式(SSE)", originalInput, actualPrompt);
+        logRequest(chatId, "流式(SSE)", actualPrompt);
 
         ChatClientRequest req = withStartTime(request, start);
         Flux<ChatClientResponse> stream = chain.nextStream(req);
@@ -57,13 +53,9 @@ public class LoggingAdvisor implements CallAdvisor, StreamAdvisor {
                 logResponse(chatId, start, aggregated));
     }
 
-    private void logRequest(String chatId, String mode, String originalInput, String actualPrompt) {
+    private void logRequest(String chatId, String mode, String actualPrompt) {
         String time = TIME_FMT.format(Instant.now().atZone(ZoneId.systemDefault()));
         log.info("[AI-请求] 时间={} chatId={} 方式={}", time, chatId, mode);
-        if (originalInput != null && !originalInput.equals(actualPrompt)) {
-            log.info("[AI-请求] chatId={} 原始输入(length={}): {}", chatId,
-                    originalInput.length(), originalInput);
-        }
         log.info("[AI-请求] chatId={} 实际Prompt(length={}): {}", chatId,
                 actualPrompt != null ? actualPrompt.length() : 0, actualPrompt);
     }

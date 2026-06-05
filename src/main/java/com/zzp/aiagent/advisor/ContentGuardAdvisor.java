@@ -44,7 +44,7 @@ public class ContentGuardAdvisor implements CallAdvisor, StreamAdvisor {
 
     private void validate(ChatClientRequest request) {
         UserMessage userMsg = request.prompt().getUserMessage();
-        String message = userMsg != null ? userMsg.getText() : "";
+        String message = userMsg != null ? rawUserMessage(userMsg.getText()) : "";
 
         ThrowUtils.throwIf(message == null || message.isBlank(), ErrorCode.EMPTY_MESSAGE);
         ThrowUtils.throwIf(message.length() > MAX_MESSAGE_LENGTH, ErrorCode.MESSAGE_TOO_LONG,
@@ -55,6 +55,17 @@ public class ContentGuardAdvisor implements CallAdvisor, StreamAdvisor {
                     "消息包含违规词汇: " + keyword);
         }
         validateImages(request.prompt().getInstructions());
+    }
+
+    private String rawUserMessage(String message) {
+        if (message == null) {
+            return "";
+        }
+        int marker = message.lastIndexOf("【用户原始需求】");
+        if (marker >= 0) {
+            return message.substring(marker + "【用户原始需求】".length()).strip();
+        }
+        return message;
     }
 
     private void validateImages(List<Message> messages) {

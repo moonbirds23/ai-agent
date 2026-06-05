@@ -44,6 +44,8 @@ public record ChatRequest(
     public static final String MODE_CHAT = "chat";
     public static final String MODE_IMAGE_ANALYSIS = "image_analysis";
     public static final String MODE_IMAGE_GENERATION = "image_generation";
+    /** Default mode — model decides what to do via Tool Calling. */
+    public static final String MODE_AUTO = "auto";
 
     // Backward-compatible 5-arg constructor (old code without mode / RAG fields)
     public ChatRequest(String message, String chatId, Boolean generationMode, String imageBase64, String imageUrl) {

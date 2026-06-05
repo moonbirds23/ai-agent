@@ -7,7 +7,7 @@ public record StreamEventVO(
         String type,
         String chatId,
         String content,
-        ChatResponseVO data
+        Object data
 ) {
     public static StreamEventVO chatId(String chatId) {
         return new StreamEventVO("chatId", chatId, null, null);
@@ -27,5 +27,18 @@ public record StreamEventVO(
 
     public static StreamEventVO progress(String chatId, String content) {
         return new StreamEventVO("progress", chatId, content, null);
+    }
+
+    public static StreamEventVO imageCandidates(String chatId, ImageCandidatesEventVO data) {
+        return new StreamEventVO("image_candidates", chatId, null, data);
+    }
+
+    public static StreamEventVO imageGenerated(String chatId, ImageGeneratedEventVO data) {
+        return new StreamEventVO("image_generated", chatId, null, data);
+    }
+
+    /** Emitted when the model invokes a tool — shows the thinking process to the user. */
+    public static StreamEventVO toolCall(String toolName, String label, String chatId) {
+        return new StreamEventVO("tool_call", chatId, label, null);
     }
 }

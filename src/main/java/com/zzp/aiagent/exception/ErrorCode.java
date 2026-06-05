@@ -22,6 +22,10 @@ public enum ErrorCode {
     IMAGE_ANALYSIS_FAILED(50021, "图片分析失败"),
     GALLERY_OPERATION_FAILED(50040, "图库操作失败"),
     PROFILE_OPERATION_FAILED(50050, "图片画像操作失败"),
+    WEB_SEARCH_FAILED(60000, "网页搜索失败"),
+    WEB_FETCH_FAILED(60001, "网页抓取失败"),
+    UNSAFE_URL(60003, "URL 地址不安全"),
+    RESOURCE_TOO_LARGE(60004, "资源文件过大"),
     SYSTEM_ERROR(59999, "系统内部异常");
 
     private final int code;
