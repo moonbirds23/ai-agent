@@ -388,6 +388,7 @@ public interface ImageGenerationService {
 - [x] **chat_memory_retrieve_size 修复**（Spring AI 1.0.0 GA MCMA 无截断能力，改为 `RedisChatMemory.get()` 内部使用 Redis LRANGE 负索引只取最后 N 条）
 - [x] **参考图数量限制 ≤ 3**（`ChatRequest.referencePictureIds` 加 `@Size(max=3)`，Jakarta 校验在 Controller 层拦截）
 - [x] **图库存储位置 + 缓存图库**（`StorageLocation` 常量类 MAIN/CACHE，`GalleryPicture.storageLocation` 字段，`GalleryProperties` 配置，`GalleryCacheCleanupTask` 定时清理过期缓存图，V4 Flyway 迁移）
+- [ ] **图库元数据来源字段补充**（图库图片可能来自本地上传、网络链接导入、对话缓存或生图保存，元数据需新增图片出处/来源类型，并在网络链接导入时保留原始来源 URL，便于追溯、展示和后续检索过滤）
 - [x] **对话图片自动入库**（`PictureApp.autoSaveToCacheGallery()` → 图片自动以 CACHE 位置入库，`buildUserSpec()` 用入库 URL 构造 Media（ChatMemory 可识别为 GALLERY），入库失败降级为直发 bytes）
 - [x] **生成模式当前图片补发**（`handleGeneration/handleGenerationStream` 原本丢弃当前图片，现通过 `buildGenerationUserSpec()` 将入库后的原图 Media 挂到生成 Prompt 上）
 - [x] **会话窗口消息数限制**（`ChatMemoryProperties.maxConversationMessages` 默认 200，`PictureApp` 入口调用 `ChatHistoryRepository.countByConversation()` 校验，超限抛 BusinessException）

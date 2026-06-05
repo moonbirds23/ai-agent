@@ -83,13 +83,15 @@ class PromptTemplateTest {
         @Test
         @DisplayName("system.st 含 JSON Schema → 不抛异常")
         void jsonSchemaInSystemPrompt_noException() {
-            String jsonSchema = "{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"}}}";
-
+            // The new system.st is an agent prompt (no {outputFormat} variable).
+            // Rendering with an unused key should not throw — unused vars are ignored.
             String result = promptTemplate.render("default", "system",
-                    "outputFormat", jsonSchema);
+                    "outputFormat", "test");
 
             assertThat(result).isNotEmpty();
-            assertThat(result).contains(jsonSchema);
+            assertThat(result).contains("AI");
+            // Verify that unused keys don't cause template errors
+            assertThat(result).doesNotContain("{outputFormat}");
         }
     }
 
@@ -107,9 +109,9 @@ class PromptTemplateTest {
             String result = promptTemplate.render("nonexistent", "system",
                     "outputFormat", "test");
 
-            // 回退到 default/system.st 后应正常渲染
+            // 回退到 default/system.st 后应正常渲染（新 prompt 含 AI 助手描述）
             assertThat(result).isNotEmpty();
-            assertThat(result).contains("test");
+            assertThat(result).contains("AI");
         }
 
         /**
@@ -162,14 +164,14 @@ class PromptTemplateTest {
          * 目的：验证 system.st 包含输出格式约束的核心指令。
          */
         @Test
-        @DisplayName("system.st → 含图片生成助手定位")
+        @DisplayName("system.st → 含 AI 助手定位")
         void systemTemplate_hasAssistantRole() {
             String result = promptTemplate.render("default", "system",
                     "outputFormat", "{}");
 
             assertThat(result).isNotEmpty();
-            // 核心角色定位
-            assertThat(result).contains("图片生成");
+            // 核心角色定位 — agent prompt 描述 AI 能力
+            assertThat(result).contains("AI");
         }
 
         /**

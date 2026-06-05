@@ -1,6 +1,5 @@
 package com.zzp.aiagent.advisor;
 
-import com.zzp.aiagent.utils.PromptTemplate;
 import com.zzp.aiagent.exception.BusinessException;
 import com.zzp.aiagent.exception.ErrorCode;
 import org.junit.jupiter.api.DisplayName;
@@ -118,63 +117,4 @@ class AdvisorStreamTest {
         }
     }
 
-    // ─── PromptOptimizeAdvisor.aroundStream ───────────────────────
-
-    @Nested
-    @DisplayName("PromptOptimizeAdvisor 流式")
-    class PromptOptimizeStreamTest {
-
-        private final PromptOptimizeAdvisor advisor = new PromptOptimizeAdvisor(new PromptTemplate());
-
-        /**
-         * 目的：验证流式路径中每个 chunk 都被 attachOptimizedContext 注入 optimizePrompt key。
-         * 实现：userText="冬日雪景" → mock 返回 2 个 chunk → aroundStream → StepVerifier 对每个 chunk 断言 adviseContext。
-         * 结果：2 个 chunk 的 adviseContext 都含 optimizedPrompt，值为包含"冬日雪景"的优化版 prompt。
-         */
-        @Test
-        @DisplayName("正常消息 → 改写 userText，每个 chunk 注入 optimizedPrompt")
-        void normalMessage_enhancesAndAttachesPerChunk() {
-            ChatClientRequest req = requestWithText("冬日雪景");
-            StreamAdvisorChain chain = mock(StreamAdvisorChain.class);
-            ChatClientResponse chunk = emptyResponse();
-            when(chain.nextStream(any())).thenReturn(Flux.just(chunk, chunk));
-
-            Flux<ChatClientResponse> result = advisor.adviseStream(req, chain);
-
-            StepVerifier.create(result)
-                    .assertNext(r -> {
-                        String optimized = (String) r.context().get("optimizedPrompt");
-                        assertThat(optimized).contains("画面主体", "环境背景", "冬日雪景");
-                    })
-                    .assertNext(r -> {
-                        String optimized = (String) r.context().get("optimizedPrompt");
-                        assertThat(optimized).contains("冬日雪景");
-                    })
-                    .verifyComplete();
-        }
-
-        /**
-         * 目的：空消息不触发改写，但 attachOptimizedContext 仍会注入空的 optimizedPrompt key。
-         * 实现：userText="" → mock Flux.just(chunk) → 断言响应文本为 "ok" 且 adviseContext 含 optimizedPrompt。
-         * 结果：流正常完成，文本透传。
-         */
-        @Test
-        @DisplayName("空消息 → 不做改写，流透传（adviseContext 仍会注入 optimizedPrompt）")
-        void emptyMessage_passesThrough() {
-            ChatClientRequest req = requestWithText("");
-            StreamAdvisorChain chain = mock(StreamAdvisorChain.class);
-            ChatClientResponse chunk = emptyResponse();
-            when(chain.nextStream(any())).thenReturn(Flux.just(chunk));
-
-            Flux<ChatClientResponse> result = advisor.adviseStream(req, chain);
-
-            StepVerifier.create(result)
-                    .assertNext(r -> {
-                        String text = r.chatResponse().getResult().getOutput().getText();
-                        assertThat(text).isEqualTo("ok");
-                        assertThat(r.context()).containsKey("optimizedPrompt");
-                    })
-                    .verifyComplete();
-        }
-    }
 }

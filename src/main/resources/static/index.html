@@ -87,10 +87,11 @@ body{font:14px/1.5 'Microsoft YaHei',sans-serif;background:#e8ecf1;display:flex;
 .prompt-detail pre{margin-top:6px;white-space:pre-wrap;word-break:break-word;font-family:inherit;line-height:1.5;background:#fafafa;padding:8px;border-radius:4px}
 
 /* ====== Mode tabs ====== */
-#mode-tabs{display:flex;gap:0;padding:0 20px;border-bottom:1px solid #f0f0f0;flex-shrink:0}
+#mode-tabs{display:flex;gap:0;padding:0 20px;border-bottom:1px solid #f0f0f0;flex-shrink:0;align-items:center}
 #mode-tabs .tab{padding:8px 16px;font-size:13px;cursor:pointer;color:#888;border-bottom:2px solid transparent;transition:all .15s;background:none;border-top:none;border-left:none;border-right:none;font-family:inherit}
 #mode-tabs .tab:hover{color:#1890ff}
 #mode-tabs .tab.active{color:#1890ff;border-bottom-color:#1890ff;font-weight:600}
+#mode-tabs .mode-label{padding:10px 16px;font-size:13px;color:#1890ff;font-weight:500}
 
 /* ====== Input area ====== */
 #input-area{display:flex;gap:8px;padding:12px 20px;border-top:1px solid #eee;align-items:flex-end;flex-shrink:0}
@@ -148,6 +149,21 @@ select:focus,.right-select:focus{border-color:#1890ff}
 .toast.show{opacity:1}
 ::-webkit-scrollbar{width:5px}
 ::-webkit-scrollbar-thumb{background:#ccc;border-radius:3px}
+
+/* ====== Tool progress timeline ====== */
+.tool-call-bubble{align-self:flex-start;max-width:85%;padding:7px 12px;font-size:12px;color:#555;background:#f0f7ff;border-radius:8px;border-left:3px solid #1890ff;display:block;flex-shrink:0;white-space:pre-wrap;word-break:break-word}
+.tool-call-bubble.active{background:#f0f7ff;border-left-color:#1890ff}
+.tool-call-bubble.complete{background:#f6ffed;border-left-color:#52c41a}
+.tool-call-bubble.error{background:#fff2f0;border-left-color:#ff4d4f;color:#ff4d4f}
+.tool-call-bubble .tc-head{display:flex;align-items:center;gap:6px;margin-bottom:3px;font-weight:600;color:#1890ff}
+.tool-call-bubble.complete .tc-head{color:#52c41a}
+.tool-call-bubble.error .tc-head{color:#ff4d4f}
+.tool-call-bubble .tc-status{font-size:11px;color:#999;font-weight:400}
+.tool-call-bubble .tc-label{font-weight:500}
+
+.chat-image-block{margin:6px 0;padding:6px;background:#fafafa;border-radius:8px;display:inline-block}
+.save-to-gallery-btn{padding:3px 10px;font-size:11px;background:#1890ff;color:#fff;border:none;border-radius:4px;cursor:pointer;margin-top:4px}
+.save-to-gallery-btn:hover{background:#40a9ff}
 </style>
 </head>
 <body>
@@ -197,9 +213,7 @@ select:focus,.right-select:focus{border-color:#1890ff}
     <!-- ===== CENTER: Chat ===== -->
     <div class="panel" id="center-panel">
       <div id="mode-tabs">
-        <button class="tab active" data-mode="chat" onclick="switchMode('chat')">聊天</button>
-        <button class="tab" data-mode="image_analysis" onclick="switchMode('image_analysis')">图片分析</button>
-        <button class="tab" data-mode="image_generation" onclick="switchMode('image_generation')">图片生成</button>
+        <span class="mode-label">🤖 AI 智能助手 — 说出你的需求，我来处理</span>
       </div>
       <div id="progress-bar"></div>
       <div id="messages">
@@ -314,13 +328,14 @@ select:focus,.right-select:focus{border-color:#1890ff}
 let chatId = null;
 let sending = false;
 let chatImageBase64 = null;
-let currentMode = 'chat';
+let currentMode = 'auto';
 let selectedReferences = [];   // array of GalleryPicture ids
 let galleryPictures = [];      // loaded gallery pictures cache
 let useGalleryRag = true;
 let saveGeneratedToGallery = false;
 let uploadFiles = [];  // {name, base64}[]
 let templates = [];
+let activeToolRecords = [];
 const MSG = document.getElementById('messages');
 const INPUT = document.getElementById('input');
 const SEND_BTN = document.getElementById('send');
@@ -358,24 +373,15 @@ function toast(msg, ms) {
 
 /* ====== MODE ====== */
 function switchMode(mode) {
+  // Mode switching removed — AI agent handles intent automatically.
+  // Kept for backward compatibility with any existing callers.
   currentMode = mode;
-  document.querySelectorAll('#mode-tabs .tab').forEach(t => t.classList.remove('active'));
-  document.querySelector('#mode-tabs .tab[data-mode="' + mode + '"]').classList.add('active');
-  // Show file upload hint for image modes
-  const uploadLabel = document.getElementById('image-upload');
-  if (mode === 'image_analysis') {
-    uploadLabel.style.borderColor = '#1890ff';
-    uploadLabel.style.color = '#1890ff';
-  } else {
-    uploadLabel.style.borderColor = '#d9d9d9';
-    uploadLabel.style.color = '#999';
-  }
   if (mode === 'image_generation') {
     INPUT.placeholder = '描述你想要生成的图片...';
   } else if (mode === 'image_analysis') {
     INPUT.placeholder = '上传图片后点击发送，或输入补充描述...';
   } else {
-    INPUT.placeholder = '输入消息...';
+    INPUT.placeholder = '描述你想做什么，AI 会自动判断...';
   }
 }
 
@@ -441,6 +447,10 @@ function showImage(data) {
         a.click();
       };
       actions.appendChild(downloadBtn);
+      const saveBtn = document.createElement('button');
+      saveBtn.textContent = '保存到图库';
+      saveBtn.onclick = () => saveImageToGallery(data.imageUrl);
+      actions.appendChild(saveBtn);
       div.appendChild(actions);
     }
     const promptText = formatGeneratedPrompt(data);
@@ -461,6 +471,28 @@ function showImage(data) {
   MSG.scrollTop = MSG.scrollHeight;
 }
 
+function showImageCandidates(data) {
+  const candidates = data && Array.isArray(data.candidates) ? data.candidates : [];
+  if (!candidates.length) return;
+
+  const div = document.createElement('div');
+  div.className = 'bubble assistant';
+  let html = '<div style="font-weight:600;margin-bottom:6px">找到 ' + candidates.length + ' 张相关图片</div>';
+  if (data.query) {
+    html += '<div style="font-size:12px;color:#666;margin-bottom:8px">搜索词：' + escHtml(data.query) + '</div>';
+  }
+  html += '<div class="image-candidates-grid">';
+  candidates.forEach(function (candidate) {
+    if (!candidate || !candidate.imageUrl) return;
+    const label = candidate.title || ('来源: ' + extractHost(candidate.sourceUrl || candidate.imageUrl));
+    html += renderImageBlock(candidate.imageUrl, label);
+  });
+  html += '</div>';
+  div.innerHTML = html;
+  MSG.appendChild(div);
+  MSG.scrollTop = MSG.scrollHeight;
+}
+
 function formatGeneratedPrompt(data) {
   const parts = [];
   if (data.imagePrompt) parts.push('Prompt：\n' + data.imagePrompt);
@@ -471,25 +503,121 @@ function formatGeneratedPrompt(data) {
 }
 
 function formatChatData(data) {
-  const parts = [];
-  if (data.message) parts.push(data.message);
-  const promptLabel = data.type === 'image_analyzed' ? '可复用提示词：' : '优化提示词：';
-  const detailLabel = data.type === 'image_analyzed' ? '图片分析详情：' : '修订提示词：';
-  if (data.imagePrompt) parts.push(promptLabel + '\n' + data.imagePrompt);
-  if (data.style) parts.push('风格：' + data.style);
-  if (data.dimensions) parts.push('尺寸：' + data.dimensions);
-  if (data.revisedPrompt) parts.push(detailLabel + '\n' + data.revisedPrompt);
-  return parts.join('\n\n') || '已完成处理';
+  var text = escHtml(data.message || '已完成处理');
+
+  // Render [ID:NNN] as inline gallery thumbnails
+  text = renderGalleryRefs(text);
+
+  // Render Markdown image links and direct image URLs as inline thumbnails with save button
+  text = renderImageUrls(text);
+
+  if (data.type === 'image_generated' && data.imageUrl) {
+    var imgHtml = renderImageBlock(data.imageUrl, 'AI 生成图片');
+    return imgHtml + '<br>' + text;
+  }
+  return text;
+}
+
+/** Replace [ID:NNN] with inline gallery thumbnails + save hint */
+function renderGalleryRefs(text) {
+  return text.replace(/\[ID:(\d+)\]\s*([^\n]*)/g, function (match, id, name) {
+    var url = '/api/gallery/files/' + id;
+    return '<span class="inline-gallery-ref">' +
+      '<img src="' + url + '" alt="ID:' + id + '" loading="lazy" ' +
+      'onerror="this.parentElement.style.display=\'none\'" ' +
+      'style="width:60px;height:60px;object-fit:cover;border-radius:4px;border:1px solid #e8e8e8;display:inline-block;margin:2px;cursor:pointer" ' +
+      'onclick="showImage({imageUrl:' + jsString(url) + ',message:' + jsString(name || '') + '})">' +
+      '<br><span style="font-size:10px;color:#888">图库 ID:' + id + '</span>' +
+      '</span>';
+  });
+}
+
+/** Detect image URLs in text and render as clickable thumbnails with save button */
+function renderImageUrls(text) {
+  var rendered = new Set();
+
+  // Markdown image syntax: ![alt](url)
+  text = text.replace(/!\[([^\]]*)\]\((https?:\/\/[^\s)]+)\)/gi, function (match, alt, url) {
+    var cleanUrl = cleanupUrl(url);
+    rendered.add(cleanUrl);
+    return renderImageBlock(cleanUrl, alt || ('来源: ' + extractHost(cleanUrl)));
+  });
+
+  // Labeled Markdown link: 图片URL: [点击查看](url)
+  var labeledMarkdownRegex = /((?:图片URL|Image URL)\s*[:：]\s*)\[([^\]]*)\]\((https?:\/\/[^\s)]+)\)/gi;
+  text = text.replace(labeledMarkdownRegex, function (match, prefix, label, url) {
+    var cleanUrl = cleanupUrl(url);
+    rendered.add(cleanUrl);
+    return prefix + renderImageBlock(cleanUrl, label || ('来源: ' + extractHost(cleanUrl)));
+  });
+
+  // Labeled bare URL: 图片URL: https://...
+  var labeledRegex = /((?:图片URL|Image URL)\s*[:：]\s*)(https?:\/\/[^\s，。；;]+)/gi;
+  text = text.replace(labeledRegex, function (match, prefix, url) {
+    var cleanUrl = cleanupUrl(url);
+    if (rendered.has(cleanUrl)) return prefix + url;
+    rendered.add(cleanUrl);
+    return prefix + renderImageBlock(cleanUrl, '来源: ' + extractHost(cleanUrl));
+  });
+
+  // Direct image URL with common extension.
+  var imgRegex = /(https?:\/\/\S+\.(?:png|jpg|jpeg|webp|gif|bmp)(?:\?\S*)?)/gi;
+  return text.replace(imgRegex, function (url) {
+    var cleanUrl = cleanupUrl(url);
+    if (rendered.has(cleanUrl)) return url;
+    rendered.add(cleanUrl);
+    return renderImageBlock(cleanUrl, '来源: ' + extractHost(cleanUrl));
+  });
+}
+
+function cleanupUrl(url) {
+  return (url || '').replace(/&amp;/g, '&').replace(/[)\]}>'"，。；;]+$/g, '');
+}
+
+function renderImageBlock(url, sourceLabel) {
+  var safeUrl = escAttr(url);
+  var safeLabel = escHtml(sourceLabel);
+  var saveBtn = '<button class="save-to-gallery-btn" onclick="saveImageToGallery(' + jsString(url) + ')">' +
+    '⬇ 保存到图库</button>';
+  return '<div class="chat-image-block">' +
+    '<img src="' + safeUrl + '" alt="' + safeLabel + '" loading="lazy" ' +
+    'onerror="this.parentElement.style.display=\'none\'" ' +
+    'onclick="showImage({imageUrl:' + jsString(url) + '})" ' +
+    'style="max-width:200px;max-height:200px;object-fit:contain;border-radius:8px;border:1px solid #e8e8e8;cursor:pointer;display:block;margin:4px 0">' +
+    '<div style="font-size:10px;color:#888;margin-top:2px">' + safeLabel + '</div>' +
+    saveBtn +
+    '</div>';
+}
+
+function extractHost(url) {
+  try { var u = new URL(url); return u.hostname; } catch(e) { return '外部图片'; }
+}
+
+/** Save an image URL to the gallery */
+async function saveImageToGallery(url) {
+  toast('正在导入图库...', 5000);
+  try {
+    var resp = await fetch('/api/gallery/import-url', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({imageUrl: url, name: 'web-import-' + Date.now(), category: 'web-import'})
+    });
+    var result = await resp.json();
+    if (result.code === 0) {
+      toast('已保存到图库 [ID:' + result.data.id + ']', 4000);
+      loadGallery();
+    } else {
+      toast('保存失败: ' + (result.message || '未知错误'), 4000);
+    }
+  } catch (e) {
+    toast('网络异常: ' + e.message, 4000);
+  }
 }
 
 function send() {
   const text = INPUT.value.trim();
   if (sending) return;
-  if (currentMode !== 'image_analysis' && !text) return;
-  if (currentMode === 'image_analysis' && !chatImageBase64) {
-    addBubble('error', '请先上传需要分析的图片');
-    return;
-  }
+  if (!text && !chatImageBase64) return;
 
   sending = true;
   SEND_BTN.disabled = true;
@@ -508,14 +636,12 @@ function send() {
   const body = {
     message: displayText,
     chatId: chatId,
-    generationMode: currentMode === 'image_generation',
-    mode: currentMode,
     imageBase64: chatImageBase64 || null,
-    referencePictureIds: currentMode === 'image_generation' ? selectedReferences : [],
-    useGalleryRag: currentMode === 'image_generation' ? useGalleryRag : false,
-    referenceMode: currentMode === 'image_generation' ? document.getElementById('reference-mode').value : null,
-    styleTemplateCode: currentMode === 'image_generation' ? getSelectedTemplateCode() : null,
-    saveGeneratedToGallery: currentMode === 'image_generation' ? saveGeneratedToGallery : false
+    referencePictureIds: selectedReferences,
+    useGalleryRag: useGalleryRag,
+    referenceMode: document.getElementById('reference-mode').value,
+    styleTemplateCode: getSelectedTemplateCode(),
+    saveGeneratedToGallery: saveGeneratedToGallery
   };
 
   fetch('/api/chat/stream', {
@@ -545,6 +671,7 @@ function send() {
       }
     }
   }).catch(e => {
+    completeActiveToolRecords('error');
     assistantBubble.className = 'bubble error';
     assistantBubble.textContent = '网络异常，请重试';
     PROGRESS.style.display = 'none';
@@ -565,32 +692,68 @@ function handleStreamEvent(event, assistantBubble, fullText) {
       MSG.scrollTop = MSG.scrollHeight;
       break;
     case 'done':
+      completeActiveToolRecords('complete');
       if (event.data) {
-        // Check for ragDebugInfo first
-        if (event.data.ragDebugInfo) {
-          showRagDebugInfo(event.data.ragDebugInfo);
-        }
-        if (event.data.type === 'image_generated') {
-          assistantBubble.remove();
-          showImage(event.data);
-        } else {
-          assistantBubble.textContent = formatChatData(event.data);
-        }
+        assistantBubble.innerHTML = formatChatData(event.data);
       }
       PROGRESS.style.display = 'none';
       MSG.scrollTop = MSG.scrollHeight;
       break;
+    case 'image_candidates':
+      showImageCandidates(event.data);
+      MSG.scrollTop = MSG.scrollHeight;
+      break;
+    case 'image_generated':
+      if (event.data) showImage(event.data);
+      MSG.scrollTop = MSG.scrollHeight;
+      break;
     case 'progress':
-      assistantBubble.textContent = event.content || '生成中...';
+      showToolCall(event.content || '生成中...', 'progress');
       PROGRESS.style.display = 'block';
       MSG.scrollTop = MSG.scrollHeight;
       break;
+    case 'tool_call':
+      showToolCall(event.content, 'tool_call');
+      PROGRESS.style.display = 'block';
+      break;
     case 'error':
+      completeActiveToolRecords('error');
       assistantBubble.className = 'bubble error';
       assistantBubble.textContent = event.content;
       PROGRESS.style.display = 'none';
       break;
   }
+}
+
+function showToolCall(label, type) {
+  const div = document.createElement('div');
+  div.className = 'tool-call-bubble active';
+  const head = document.createElement('div');
+  head.className = 'tc-head';
+  head.innerHTML = '<span class="tc-icon">&#128736;</span><span>' + (type === 'progress' ? '进度' : '工具调用') + '</span>';
+  const status = document.createElement('span');
+  status.className = 'tc-status';
+  status.textContent = '进行中';
+  head.appendChild(status);
+  div.appendChild(head);
+
+  const body = document.createElement('div');
+  body.className = 'tc-label';
+  body.innerHTML = renderImageUrls(escHtml(label || '工具调用中...'));
+  div.appendChild(body);
+
+  MSG.appendChild(div);
+  activeToolRecords.push({ element: div, status: status });
+  MSG.scrollTop = MSG.scrollHeight;
+}
+
+function completeActiveToolRecords(state) {
+  activeToolRecords.forEach(record => {
+    record.element.classList.remove('active');
+    record.element.classList.add(state === 'error' ? 'error' : 'complete');
+    record.status.textContent = state === 'error' ? '已中止' : '已完成';
+  });
+  activeToolRecords = [];
 }
 
 function clearDebugSections() {
@@ -620,8 +783,8 @@ async function loadGallery() {
     const resp = await fetch(url);
     const result = await resp.json();
     if (result.code === 0 && result.data) {
-      galleryPictures = result.data;
-      renderGallery(result.data);
+      galleryPictures = result.data.records;
+      renderGallery(result.data.records);
     } else {
       grid.innerHTML = '<div class="placeholder">加载失败: ' + (result.message || '未知错误') + '</div>';
     }
@@ -720,18 +883,27 @@ async function toggleFavorite(id) {
 }
 
 async function analyzePicture(id) {
-  toast('正在发起AI分析...');
+  console.log('[Gallery] analyzePicture id=' + id);
+  var btn = event && event.target;
+  if (btn) { btn.textContent = '...'; btn.style.pointerEvents = 'none'; }
+  toast('正在发起AI分析...（约10秒）', 12000);
   try {
     const resp = await fetch('/api/profile/' + id + '/analyze', { method: 'POST' });
     const result = await resp.json();
+    console.log('[Gallery] analyze result:', result);
     if (result.code === 0) {
       const profile = result.data;
-      toast('分析完成: ' + (profile.subject || '暂无主题') + ' / ' + (profile.style || '暂无风格'));
+      toast('分析完成: ' + (profile.subject || '暂无主题') + ' / ' + (profile.style || '暂无风格'), 5000);
+      // Refresh gallery to show updated info
+      loadGallery();
     } else {
-      toast('分析失败: ' + result.message);
+      toast('分析失败: ' + result.message, 5000);
     }
   } catch (e) {
-    toast('网络异常');
+    console.error('[Gallery] analyze failed:', e);
+    toast('网络异常: ' + e.message, 5000);
+  } finally {
+    if (btn) { btn.textContent = '分析'; btn.style.pointerEvents = ''; }
   }
 }
 
@@ -1005,6 +1177,9 @@ function escHtml(s) {
 function escAttr(s) {
   if (!s) return '';
   return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+function jsString(s) {
+  return JSON.stringify(s || '').replace(/</g, '\\u003c').replace(/>/g, '\\u003e').replace(/&/g, '\\u0026');
 }
 </script>
 </body>

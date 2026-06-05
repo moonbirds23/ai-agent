@@ -4,6 +4,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
+import java.util.Map;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
@@ -113,12 +116,67 @@ class StreamEventVOTest {
     @Test
     @DisplayName("done 序列化 → data 嵌套 ChatResponseVO 完整输出")
     void done_shouldSerializeDataNested() throws Exception {
-        ChatResponseVO data = new ChatResponseVO("id1", "chat", "你好", null, null, null, null, null, null, null);
+        ChatResponseVO data = new ChatResponseVO("id1", "chat", "你好", null, null);
         String json = mapper.writeValueAsString(StreamEventVO.done("id1", data));
 
         assertThat(json).contains("\"type\":\"done\"");
         assertThat(json).contains("\"chatId\":\"id1\"");
         assertThat(json).contains("\"type\":\"chat\"");
         assertThat(json).contains("\"message\":\"你好\"");
+    }
+
+    @Test
+    @DisplayName("imageCandidates 工厂 → type=image_candidates, 携带候选列表 data")
+    void imageCandidates_shouldSetTypeAndData() {
+        ImageCandidateVO candidate = new ImageCandidateVO(
+                "雪山湖泊", "https://example.com/image", "https://example.com/page", "iusc", 0.9);
+        ImageCandidatesEventVO data = new ImageCandidatesEventVO("雪山湖泊", "auto", List.of(candidate));
+
+        StreamEventVO event = StreamEventVO.imageCandidates("chat-1", data);
+
+        assertThat(event.type()).isEqualTo("image_candidates");
+        assertThat(event.chatId()).isEqualTo("chat-1");
+        assertThat(event.content()).isNull();
+        assertThat(event.data()).isEqualTo(data);
+    }
+
+    @Test
+    @DisplayName("imageGenerated 工厂 → type=image_generated, 携带生图 data")
+    void imageGenerated_shouldSetTypeAndData() {
+        ImageGeneratedEventVO data = new ImageGeneratedEventVO(
+                "https://example.com/generated", null, "a cyberpunk cat", "revised", "赛博朋克", "1024x1024",
+                Map.of("provider", "test"));
+
+        StreamEventVO event = StreamEventVO.imageGenerated("chat-1", data);
+
+        assertThat(event.type()).isEqualTo("image_generated");
+        assertThat(event.chatId()).isEqualTo("chat-1");
+        assertThat(event.content()).isNull();
+        assertThat(event.data()).isEqualTo(data);
+    }
+
+    @Test
+    @DisplayName("图片事件序列化 → data 输出结构化图片字段")
+    void imageEvents_shouldSerializeDataNested() throws Exception {
+        ImageCandidateVO candidate = new ImageCandidateVO(
+                "候选图", "https://example.com/image", "https://example.com/page", "iusc", 0.8);
+        String candidatesJson = mapper.writeValueAsString(StreamEventVO.imageCandidates(
+                "chat-1", new ImageCandidatesEventVO("候选图", "auto", List.of(candidate))));
+
+        assertThat(candidatesJson).contains("\"type\":\"image_candidates\"");
+        assertThat(candidatesJson).contains("\"chatId\":\"chat-1\"");
+        assertThat(candidatesJson).contains("\"query\":\"候选图\"");
+        assertThat(candidatesJson).contains("\"imageUrl\":\"https://example.com/image\"");
+        assertThat(candidatesJson).contains("\"score\":0.8");
+
+        ImageGeneratedEventVO generated = new ImageGeneratedEventVO(
+                "https://example.com/generated", null, "prompt", "revised", "写实", "1024x1024", Map.of("provider", "test"));
+        String generatedJson = mapper.writeValueAsString(StreamEventVO.imageGenerated("chat-2", generated));
+
+        assertThat(generatedJson).contains("\"type\":\"image_generated\"");
+        assertThat(generatedJson).contains("\"chatId\":\"chat-2\"");
+        assertThat(generatedJson).contains("\"imageUrl\":\"https://example.com/generated\"");
+        assertThat(generatedJson).contains("\"imagePrompt\":\"prompt\"");
+        assertThat(generatedJson).contains("\"revisedPrompt\":\"revised\"");
     }
 }

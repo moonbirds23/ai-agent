@@ -1,6 +1,5 @@
 package com.zzp.aiagent.advisor;
 
-import com.zzp.aiagent.utils.PromptTemplate;
 import com.zzp.aiagent.exception.BusinessException;
 import com.zzp.aiagent.exception.ErrorCode;
 import org.junit.jupiter.api.BeforeEach;
@@ -151,79 +150,6 @@ class AdvisorTest {
         @DisplayName("order 应为 0（最优先执行）")
         void orderIsZero() {
             assertThat(advisor.getOrder()).isEqualTo(0);
-        }
-    }
-
-    // ─── PromptOptimizeAdvisor ────────────────────────────────────
-
-    @Nested
-    @DisplayName("PromptOptimizeAdvisor：改写 userText 为专业生图 prompt")
-    class PromptOptimizeTest {
-
-        private final PromptOptimizeAdvisor advisor = new PromptOptimizeAdvisor(new PromptTemplate());
-
-        /**
-         * 目的：验证用户口语化输入被改写为包含画面主体/环境/光影的专业 prompt。
-         * 实现：userText="雪景" → aroundCall → 验证 chain.nextAroundCall 被调用。
-         * 结果：下游收到的 ChatClientRequest 的 userText 已被替换为优化版。
-         */
-        @Test
-        @DisplayName("正常消息 → 改写 userText 为优化版 prompt")
-        void normalMessage_getsOptimized() {
-            ChatClientRequest req = requestWithUserText("雪景");
-            CallAdvisorChain chain = mock(CallAdvisorChain.class);
-            when(chain.nextCall(any())).thenReturn(emptyResponse());
-
-            advisor.adviseCall(req, chain);
-
-            verify(chain, times(1)).nextCall(any());
-        }
-
-        /**
-         * 目的：验证优化后的 prompt 被注入 adviseContext，供下游 LoggingAdvisor 等读取。
-         * 实现：userText="冬日雪景" → aroundCall → 断言返回 response 的 adviseContext 含 "optimizedPrompt"。
-         * 结果：optimizedPrompt 值包含关键要素词汇（画面主体、环境背景）和原始输入词。
-         */
-        @Test
-        @DisplayName("优化后 prompt 写入 adviseContext 共享给下游")
-        void optimizedPrompt_sharedInContext() {
-            ChatClientRequest req = requestWithUserText("冬日雪景");
-            CallAdvisorChain chain = mock(CallAdvisorChain.class);
-            ChatClientResponse rawResponse = emptyResponse();
-            when(chain.nextCall(any())).thenReturn(rawResponse);
-
-            ChatClientResponse response = advisor.adviseCall(req, chain);
-
-            assertThat(response.context()).containsKey("optimizedPrompt");
-            String optimized = (String) response.context().get("optimizedPrompt");
-            assertThat(optimized).contains("画面主体", "环境背景", "冬日雪景");
-        }
-
-        /**
-         * 目的：空消息不做改写，原样透传（由 ContentGuard 在前面拦截非空校验）。
-         * 实现：userText="" → aroundCall → 验证 chain 收到的仍是原 request（未改写）。
-         * 结果：chain.nextCall(req) 被调用 1 次，参数为原 request。
-         */
-        @Test
-        @DisplayName("空消息 → 不做改写，原样放行")
-        void emptyMessage_passesThrough() {
-            ChatClientRequest req = requestWithUserText("");
-            CallAdvisorChain chain = mock(CallAdvisorChain.class);
-            when(chain.nextCall(req)).thenReturn(emptyResponse());
-
-            advisor.adviseCall(req, chain);
-
-            verify(chain).nextCall(req);
-        }
-
-        /**
-         * 目的：PromptOptimize 的 order 应为 20，在 ContentGuard(0) 之后、Logging(30) 之前。
-         * 结果：getOrder() == 20。
-         */
-        @Test
-        @DisplayName("order 应为 20")
-        void orderIsTwenty() {
-            assertThat(advisor.getOrder()).isEqualTo(20);
         }
     }
 
