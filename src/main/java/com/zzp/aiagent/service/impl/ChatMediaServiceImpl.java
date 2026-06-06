@@ -1,5 +1,6 @@
 package com.zzp.aiagent.service.impl;
 
+import com.zzp.aiagent.common.UrlSecurityValidator;
 import com.zzp.aiagent.model.entity.GalleryPicture;
 import com.zzp.aiagent.service.ChatMediaService;
 import com.zzp.aiagent.service.GalleryService;
@@ -10,6 +11,7 @@ import org.springframework.core.io.ByteArrayResource;
 import org.springframework.stereotype.Service;
 import org.springframework.util.MimeTypeUtils;
 
+import java.net.URI;
 import java.net.URL;
 import java.util.Base64;
 import java.util.Locale;
@@ -20,9 +22,11 @@ import java.util.Locale;
 public class ChatMediaServiceImpl implements ChatMediaService {
 
     private final GalleryService galleryService;
+    private final UrlSecurityValidator urlValidator;
 
-    public ChatMediaServiceImpl(GalleryService galleryService) {
+    public ChatMediaServiceImpl(GalleryService galleryService, UrlSecurityValidator urlValidator) {
         this.galleryService = galleryService;
+        this.urlValidator = urlValidator;
     }
 
     @Override
@@ -46,12 +50,13 @@ public class ChatMediaServiceImpl implements ChatMediaService {
             return new Media(MimeTypeUtils.parseMimeType(mime), new ByteArrayResource(bytes));
         }
 
-        // 3. Try image URL
+        // 3. Try image URL (validated against SSRF)
         if (imageUrl != null && !imageUrl.isBlank()) {
             try {
+                URI validatedUri = urlValidator.validate(imageUrl);
                 String ext = extractFormatFromUrl(imageUrl);
                 String mime = mimeTypeFromFormat(ext);
-                return new Media(MimeTypeUtils.parseMimeType(mime), new URL(imageUrl).toURI());
+                return new Media(MimeTypeUtils.parseMimeType(mime), validatedUri);
             } catch (Exception e) {
                 log.warn("[ChatMediaService] 无效图片URL: {}", imageUrl, e);
             }

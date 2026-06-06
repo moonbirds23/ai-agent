@@ -65,4 +65,13 @@ public record GalleryPicture(
                 userId, spaceId, reviewStatus, picColor, sourceType, favorited,
                 createTime, LocalDateTime.now(), storageLocation, picHash);
     }
+
+    /** Return a copy with updated metadata (name, introduction, category, tags). */
+    public GalleryPicture withMeta(String name, String introduction, String category, List<String> tags) {
+        return new GalleryPicture(id, url, thumbnailUrl, name, introduction, category,
+                tags != null ? List.copyOf(tags) : this.tags,
+                picSize, picWidth, picHeight, picScale, picFormat,
+                userId, spaceId, reviewStatus, picColor, sourceType, favorited,
+                createTime, LocalDateTime.now(), storageLocation, picHash);
+    }
 }

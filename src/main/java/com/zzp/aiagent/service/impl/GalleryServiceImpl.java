@@ -9,7 +9,10 @@ import com.zzp.aiagent.model.entity.GalleryPicture;
 import com.zzp.aiagent.domain.gallery.GalleryQueryRequest;
 import com.zzp.aiagent.domain.gallery.GalleryUploadRequest;
 import com.zzp.aiagent.model.enums.StorageLocation;
+import com.zzp.aiagent.domain.rag.RagCandidate;
+import com.zzp.aiagent.domain.rag.RagSearchCriteria;
 import com.zzp.aiagent.service.GalleryService;
+import com.zzp.aiagent.service.HybridGalleryRetriever;
 import com.zzp.aiagent.service.ImageDownloadService;
 import com.zzp.aiagent.service.PictureAiProfileService;
 import com.zzp.aiagent.model.dto.image.DownloadedImage;
@@ -17,11 +20,16 @@ import com.zzp.aiagent.repository.GalleryPictureRepository;
 import com.zzp.aiagent.manager.ObjectStorageService;
 import com.zzp.aiagent.domain.storage.StoredObject;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Profile;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
+
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 
 import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
@@ -42,15 +50,21 @@ public class GalleryServiceImpl implements GalleryService {
     private final ImageDownloadService imageDownloadService;
     private final ObjectStorageService storageService;
     private final PictureAiProfileService profileService;
+    private final HybridGalleryRetriever hybridRetriever;
+    private final Executor executor;
 
     public GalleryServiceImpl(GalleryPictureRepository repository,
                               ImageDownloadService imageDownloadService,
                               ObjectStorageService storageService,
-                              PictureAiProfileService profileService) {
+                              PictureAiProfileService profileService,
+                              HybridGalleryRetriever hybridRetriever,
+                              @Qualifier("taskExecutor") Executor executor) {
         this.repository = repository;
         this.imageDownloadService = imageDownloadService;
         this.storageService = storageService;
         this.profileService = profileService;
+        this.hybridRetriever = hybridRetriever;
+        this.executor = executor;
     }
 
     @Override
@@ -94,7 +108,19 @@ public class GalleryServiceImpl implements GalleryService {
             picture = picture.withFavorite(request.favorited());
         }
 
-        GalleryPicture saved = repository.save(picture);
+        GalleryPicture saved;
+        try {
+            saved = repository.save(picture);
+        } catch (DuplicateKeyException e) {
+            // Lost race — another thread inserted the same hash between our check and insert
+            List<GalleryPicture> dup = repository.findByHash(picHash);
+            if (!dup.isEmpty()) {
+                log.info("[GalleryService] 并发去重命中，返回已有记录 id={} hash={}",
+                        dup.get(0).id(), picHash);
+                return dup.get(0);
+            }
+            throw e; // shouldn't happen — constraint violation but findByHash returns nothing
+        }
 
         // Save image via object storage
         String key = saved.storageKey();
@@ -107,11 +133,21 @@ public class GalleryServiceImpl implements GalleryService {
 
         log.info("[GalleryService] 上传成功 id={} name={} size={} format={}",
                 saved.id(), saved.name(), saved.picSize(), ext);
-        try {
-            profileService.analyzeDirectWithBase64(withUrl, request.imageBase64(), contentTypeFromExt(ext));
-        } catch (Exception e) {
-            log.warn("[GalleryService] 自动画像分析失败 pictureId={}, 标记为待重试", saved.id(), e);
-        }
+        // Schedule AI analysis after commit to release DB connection (P2 fix)
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                CompletableFuture.runAsync(() -> {
+                    try {
+                        profileService.analyzeDirectWithBase64(withUrl, request.imageBase64(),
+                                contentTypeFromExt(ext));
+                    } catch (Exception e) {
+                        log.warn("[GalleryService] 自动画像分析失败 pictureId={}, 标记为待重试",
+                                saved.id(), e);
+                    }
+                }, executor);
+            }
+        });
         return withUrl;
     }
 
@@ -159,11 +195,21 @@ public class GalleryServiceImpl implements GalleryService {
 
         log.info("[GalleryService] URL导入成功 id={} name={} url={}",
                 saved.id(), saved.name(), request.imageUrl());
-        try {
-            profileService.analyzeDirect(withUrl, downloaded.bytes(), downloaded.contentType());
-        } catch (Exception e) {
-            log.warn("[GalleryService] 自动画像分析失败 pictureId={}, 标记为待重试", saved.id(), e);
-        }
+        // Schedule AI analysis after commit to release DB connection (P2 fix)
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                CompletableFuture.runAsync(() -> {
+                    try {
+                        profileService.analyzeDirect(withUrl, downloaded.bytes(),
+                                downloaded.contentType());
+                    } catch (Exception e) {
+                        log.warn("[GalleryService] 自动画像分析失败 pictureId={}, 标记为待重试",
+                                saved.id(), e);
+                    }
+                }, executor);
+            }
+        });
         return withUrl;
     }
 
@@ -239,8 +285,28 @@ public class GalleryServiceImpl implements GalleryService {
     }
 
     @Override
-    public List<GalleryPicture> searchByKeyword(String query, int limit) {
-        return repository.searchByKeyword(query, limit);
+    public List<GalleryPicture> search(String query, int limit) {
+        if (query == null || query.isBlank()) return List.of();
+        RagSearchCriteria criteria = new RagSearchCriteria(
+                query, null, null, null, null, null, false, null,
+                limit * 2, limit, 0.3);
+        return hybridRetriever.retrieve(criteria).stream()
+                .map(RagCandidate::picture)
+                .distinct()
+                .limit(limit)
+                .toList();
+    }
+
+    @Override
+    public GalleryPicture update(Long id, String name, String introduction,
+                                  String category, List<String> tags) {
+        GalleryPicture existing = getById(id);
+        String newName = (name != null && !name.isBlank()) ? name : existing.name();
+        String newIntro = (introduction != null && !introduction.isBlank()) ? introduction : existing.introduction();
+        String newCat = (category != null && !category.isBlank()) ? category : existing.category();
+        List<String> newTags = (tags != null && !tags.isEmpty()) ? tags : existing.tags();
+        GalleryPicture updated = existing.withMeta(newName, newIntro, newCat, newTags);
+        return repository.save(updated);
     }
 
     private static String contentTypeFromExt(String ext) {

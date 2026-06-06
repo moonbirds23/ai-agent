@@ -13,6 +13,10 @@ body{font:14px/1.5 'Microsoft YaHei',sans-serif;background:#e8ecf1;display:flex;
 #header{padding:10px 16px;background:#fff;border-bottom:1px solid #e0e0e0;display:flex;align-items:center;gap:12px;flex-shrink:0}
 #header .title{flex:1;font-size:16px;font-weight:600;color:#1a1a2e;display:flex;align-items:center;gap:8px}
 #header .title .badge{font-size:11px;padding:1px 8px;background:#e6f4ff;color:#1890ff;border-radius:10px;font-weight:400}
+#header .nav{display:flex;gap:4px}
+#header .nav a{padding:6px 14px;border-radius:6px;font-size:13px;color:#555;text-decoration:none;transition:all .15s}
+#header .nav a:hover{background:#f0f5ff;color:#1890ff}
+#header .nav a.active{background:#e6f4ff;color:#1890ff;font-weight:600}
 #header button.new-session{padding:5px 14px;background:#fff;border:1px solid #d9d9d9;border-radius:6px;font-size:13px;cursor:pointer;color:#555}
 #header button.new-session:hover{border-color:#1890ff;color:#1890ff}
 #chatId-hint{font-size:11px;color:#bbb;font-family:monospace}
@@ -39,7 +43,7 @@ body{font:14px/1.5 'Microsoft YaHei',sans-serif;background:#e8ecf1;display:flex;
 .gallery-actions button.primary:hover{background:#40a9ff}
 .gallery-actions input[type=text]{flex:1;min-width:100px;padding:5px 8px;border:1px solid #d9d9d9;border-radius:5px;font-size:12px;outline:none}
 .gallery-actions input[type=text]:focus{border-color:#1890ff}
-.gallery-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.gallery-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
 @media(max-width:1100px){.gallery-grid{grid-template-columns:repeat(2,1fr)}}
 .gallery-card{position:relative;border:2px solid transparent;border-radius:8px;overflow:hidden;cursor:pointer;background:#fafafa;transition:border-color .15s}
 .gallery-card:hover{border-color:#b3d8ff}
@@ -55,6 +59,9 @@ body{font:14px/1.5 'Microsoft YaHei',sans-serif;background:#e8ecf1;display:flex;
 .gallery-card .analyze:hover{color:#40a9ff}
 .gallery-card .delete-btn{font-size:12px;color:#ff4d4f;cursor:pointer;margin-left:6px;font-weight:700}
 .gallery-card .delete-btn:hover{color:#ff7875}
+.gallery-card .mini-tags{display:flex;gap:2px;flex-wrap:wrap;margin-top:2px}
+	.gallery-card .mini-tag{font-size:9px;padding:0 4px;border-radius:3px;background:#f0f5ff;color:#1890ff;white-space:nowrap}
+	.gallery-card .mini-dim{font-size:9px;color:#aaa;margin-top:1px}
 #upload-form button:disabled{opacity:.6;cursor:not-allowed}
 .gallery-card .overlay{position:absolute;top:4px;right:4px;width:18px;height:18px;border-radius:3px;background:rgba(255,255,255,.9);display:flex;align-items:center;justify-content:center;font-size:11px;color:#1890ff;opacity:0;transition:opacity .15s}
 .gallery-card.selected .overlay,.gallery-card:hover .overlay{opacity:1}
@@ -164,15 +171,51 @@ select:focus,.right-select:focus{border-color:#1890ff}
 .chat-image-block{margin:6px 0;padding:6px;background:#fafafa;border-radius:8px;display:inline-block}
 .save-to-gallery-btn{padding:3px 10px;font-size:11px;background:#1890ff;color:#fff;border:none;border-radius:4px;cursor:pointer;margin-top:4px}
 .save-to-gallery-btn:hover{background:#40a9ff}
+
+/* ====== Image result cards ====== */
+.image-result-panel{margin:10px 0;padding:12px;background:#fff;border:1px solid #e8e8e8;border-radius:12px;box-shadow:0 1px 4px rgba(0,0,0,.04)}
+.image-result-panel .panel-title{font-size:13px;font-weight:600;color:#333;margin-bottom:10px;display:flex;align-items:center;gap:8px}
+.image-result-panel .panel-title .count{font-size:12px;color:#888;font-weight:400}
+.image-result-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px}
+.image-result-card{border:1px solid #eee;border-radius:10px;overflow:hidden;background:#fafafa;transition:box-shadow .15s}
+.image-result-card:hover{box-shadow:0 2px 8px rgba(0,0,0,.1)}
+.image-result-card img{width:100%;aspect-ratio:4/3;object-fit:cover;display:block;cursor:pointer}
+.image-result-card .img-info{padding:8px 10px;display:flex;flex-direction:column;gap:4px}
+.image-result-card .img-label{font-size:11px;color:#555;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.image-result-card .img-id{font-size:10px;color:#999;font-family:monospace}
+.image-result-card .img-actions{display:flex;gap:6px;padding:0 10px 8px}
+.image-result-card .img-actions button{flex:1;padding:5px 0;border:1px solid #d9d9d9;border-radius:6px;font-size:11px;cursor:pointer;background:#fff;transition:all .15s}
+.image-result-card .img-actions button:hover{border-color:#1890ff;color:#1890ff}
+.image-result-card .img-actions button.save{background:#1890ff;color:#fff;border-color:#1890ff}
+.image-result-card .img-actions button.save:hover{background:#40a9ff}
+.image-result-card .img-actions button.saving{opacity:.6;pointer-events:none}
+
+/* ====== Tool call bubble tweaks ====== */
+.tool-call-bubble .tc-body{font-size:12px;color:#888;margin-top:2px}
+
+/* ====== Loading shimmer ====== */
+@keyframes shimmer{0%{background-position:-400px 0}100%{background-position:400px 0}}
+.image-loading-shimmer{display:flex;align-items:center;gap:10px;padding:12px;background:#f8f9fb;border-radius:10px;margin:8px 0}
+.image-loading-shimmer .dot-pulse{display:flex;gap:4px}
+.image-loading-shimmer .dot{width:8px;height:8px;border-radius:50%;background:#1890ff;animation:bounce 1.4s ease-in-out infinite}
+.image-loading-shimmer .dot:nth-child(2){animation-delay:.2s}
+.image-loading-shimmer .dot:nth-child(3){animation-delay:.4s}
+@keyframes bounce{0%,80%,100%{transform:scale(0)}40%{transform:scale(1)}}
 </style>
 </head>
 <body>
 <div id="app">
   <!-- ========== HEADER ========== -->
   <div id="header">
-    <div class="title">云图库 AI 助手 <span class="badge">调试台</span></div>
-    <span id="chatId-hint"></span>
-    <button class="new-session" onclick="newSession()">+ 新对话</button>
+    <div class="title">云图库 <span class="badge">AI 助手</span></div>
+    <div class="nav">
+      <a href="index.html" class="active">AI 助手</a>
+      <a href="gallery.html">图片管理</a>
+    </div>
+    <div style="margin-left:auto;display:flex;align-items:center;gap:12px">
+      <span id="chatId-hint"></span>
+      <button class="new-session" onclick="newSession()">+ 新对话</button>
+    </div>
   </div>
 
   <!-- ========== 3-COLUMN BODY ========== -->
@@ -334,6 +377,7 @@ let galleryPictures = [];      // loaded gallery pictures cache
 let useGalleryRag = true;
 let saveGeneratedToGallery = false;
 let uploadFiles = [];  // {name, base64}[]
+let uploading = false;
 let templates = [];
 let activeToolRecords = [];
 const MSG = document.getElementById('messages');
@@ -346,9 +390,35 @@ const PREVIEW_IMG = document.getElementById('preview-img');
 
 /* ====== INIT ====== */
 window.onload = () => {
+  var restored = restoreChat();
   loadGallery();
-  loadTemplates();
+  if (!restored) loadTemplates();
 };
+
+/* ====== PERSISTENCE ====== */
+// Save chat state before page unload (switch to gallery, refresh, etc.)
+window.addEventListener('beforeunload', () => {
+  if (chatId && MSG.children.length > 0) {
+    sessionStorage.setItem('_chatId', chatId);
+    sessionStorage.setItem('_chatMsgs', MSG.innerHTML);
+  }
+});
+
+function restoreChat() {
+  var savedId = sessionStorage.getItem('_chatId');
+  var savedMsgs = sessionStorage.getItem('_chatMsgs');
+  if (savedId && savedMsgs) {
+    chatId = savedId;
+    MSG.innerHTML = savedMsgs;
+    HINT.textContent = '会话 ' + chatId.substring(0, 8);
+    MSG.scrollTop = MSG.scrollHeight;
+    // Clear saved state (don't restore on next fresh load)
+    sessionStorage.removeItem('_chatId');
+    sessionStorage.removeItem('_chatMsgs');
+    return true;
+  }
+  return false;
+}
 
 INPUT.addEventListener('keydown', e => {
   if (e.key === 'Enter' && !e.shiftKey && !sending) {
@@ -395,6 +465,13 @@ function newSession() {
   setChatId(null);
   MSG.innerHTML = '<div class="bubble assistant">你好，我是AI图片生成助手。描述你想要的图片，我来帮你生成。</div>';
   clearImage();
+  selectedReferences = [];
+  useGalleryRag = true;
+  document.getElementById('rag-toggle').classList.add('on');
+  renderReferenceBar();
+  renderRagPanel();
+  sessionStorage.removeItem('_chatId');
+  sessionStorage.removeItem('_chatMsgs');
 }
 
 function onChatImageSelect(e) {
@@ -475,21 +552,43 @@ function showImageCandidates(data) {
   const candidates = data && Array.isArray(data.candidates) ? data.candidates : [];
   if (!candidates.length) return;
 
-  const div = document.createElement('div');
-  div.className = 'bubble assistant';
-  let html = '<div style="font-weight:600;margin-bottom:6px">找到 ' + candidates.length + ' 张相关图片</div>';
-  if (data.query) {
-    html += '<div style="font-size:12px;color:#666;margin-bottom:8px">搜索词：' + escHtml(data.query) + '</div>';
-  }
-  html += '<div class="image-candidates-grid">';
-  candidates.forEach(function (candidate) {
-    if (!candidate || !candidate.imageUrl) return;
-    const label = candidate.title || ('来源: ' + extractHost(candidate.sourceUrl || candidate.imageUrl));
-    html += renderImageBlock(candidate.imageUrl, label);
+  // Remove loading shimmer if present
+  var shimmers = MSG.querySelectorAll('.image-loading-shimmer');
+  shimmers.forEach(function(s) { s.remove(); });
+
+  var panel = document.createElement('div');
+  panel.className = 'image-result-panel';
+  var sourceLabel = data.source ? ' · ' + escHtml(data.source) : '';
+  var queryLabel = data.query ? ' · ' + escHtml(data.query) : '';
+  panel.innerHTML = '<div class="panel-title">' +
+    '🖼 找到图片 <span class="count">' + candidates.length + ' 张' + sourceLabel + queryLabel + '</span></div>' +
+    '<div class="image-result-grid" id="img-grid-' + Date.now() + '"></div>';
+
+  MSG.appendChild(panel);
+  var grid = panel.querySelector('.image-result-grid');
+
+  candidates.forEach(function (c, i) {
+    if (!c || !c.imageUrl) return;
+    var card = document.createElement('div');
+    card.className = 'image-result-card';
+    var hostLabel = c.title || extractHost(c.sourceUrl || c.imageUrl);
+    var idx = i + 1;
+    var safeImgUrl = escAttr(c.imageUrl);
+    var safeSourceUrl = escAttr(c.sourceUrl || c.imageUrl);
+    card.innerHTML =
+      '<img src="' + safeImgUrl + '" alt="图' + idx + '" loading="lazy" ' +
+      'onerror="this.src=\'data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%22200%22 height=%22150%22><rect fill=%22%23f0f0f0%22 width=%22200%22 height=%22150%22/><text x=%22100%22 y=%2280%22 text-anchor=%22middle%22 fill=%22%23999%22 font-size=%2214%22>加载失败</text></svg>\'" ' +
+      'onclick=\'window.open(' + jsString(c.sourceUrl || c.imageUrl) + ',"_blank")\'>' +
+      '<div class="img-info">' +
+      '<div class="img-label" title="' + escAttr(hostLabel) + '">' + idx + '. ' + escHtml(hostLabel) + '</div>' +
+      '<div class="img-id">' + extractHost(c.sourceUrl || c.imageUrl) + '</div>' +
+      '</div>' +
+      '<div class="img-actions">' +
+      '<button onclick=\'window.open(' + jsString(c.sourceUrl || c.imageUrl) + ',"_blank")\'>🔗 来源</button>' +
+      '<button class="save" onclick=\'saveImageToGallery(' + jsString(c.imageUrl) + ', this)\'>⬇ 保存到图库</button>' +
+      '</div>';
+    grid.appendChild(card);
   });
-  html += '</div>';
-  div.innerHTML = html;
-  MSG.appendChild(div);
   MSG.scrollTop = MSG.scrollHeight;
 }
 
@@ -518,16 +617,18 @@ function formatChatData(data) {
   return text;
 }
 
-/** Replace [ID:NNN] with inline gallery thumbnails + save hint */
+/** Replace [ID:NNN] with larger gallery thumbnails + jump-to-gallery link */
 function renderGalleryRefs(text) {
   return text.replace(/\[ID:(\d+)\]\s*([^\n]*)/g, function (match, id, name) {
     var url = '/api/gallery/files/' + id;
-    return '<span class="inline-gallery-ref">' +
+    var safeName = escHtml(name || '图片 ' + id);
+    return '<span class="inline-gallery-ref" style="display:inline-block;margin:4px;vertical-align:top;text-align:center">' +
       '<img src="' + url + '" alt="ID:' + id + '" loading="lazy" ' +
       'onerror="this.parentElement.style.display=\'none\'" ' +
-      'style="width:60px;height:60px;object-fit:cover;border-radius:4px;border:1px solid #e8e8e8;display:inline-block;margin:2px;cursor:pointer" ' +
-      'onclick="showImage({imageUrl:' + jsString(url) + ',message:' + jsString(name || '') + '})">' +
-      '<br><span style="font-size:10px;color:#888">图库 ID:' + id + '</span>' +
+      'style="width:120px;height:90px;object-fit:cover;border-radius:6px;border:2px solid #1890ff;display:block;cursor:pointer" ' +
+      'onclick="window.open(\'/api/gallery/files/' + id + '\',\'_blank\')">' +
+      '<div style="font-size:10px;color:#333;margin-top:2px;font-weight:600">' + safeName + '</div>' +
+      '<a href="gallery.html" target="_blank" style="font-size:10px;color:#1890ff;text-decoration:none">→ 图库</a>' +
       '</span>';
   });
 }
@@ -577,15 +678,14 @@ function cleanupUrl(url) {
 function renderImageBlock(url, sourceLabel) {
   var safeUrl = escAttr(url);
   var safeLabel = escHtml(sourceLabel);
-  var saveBtn = '<button class="save-to-gallery-btn" onclick="saveImageToGallery(' + jsString(url) + ')">' +
-    '⬇ 保存到图库</button>';
-  return '<div class="chat-image-block">' +
+  return '<div class="chat-image-block" style="display:inline-block;margin:4px;vertical-align:top">' +
     '<img src="' + safeUrl + '" alt="' + safeLabel + '" loading="lazy" ' +
     'onerror="this.parentElement.style.display=\'none\'" ' +
-    'onclick="showImage({imageUrl:' + jsString(url) + '})" ' +
-    'style="max-width:200px;max-height:200px;object-fit:contain;border-radius:8px;border:1px solid #e8e8e8;cursor:pointer;display:block;margin:4px 0">' +
-    '<div style="font-size:10px;color:#888;margin-top:2px">' + safeLabel + '</div>' +
-    saveBtn +
+    'onclick=\'window.open(' + jsString(url) + ',"_blank")\' ' +
+    'style="width:160px;height:120px;object-fit:cover;border-radius:6px;border:1px solid #e8e8e8;cursor:pointer;display:block">' +
+    '<div style="font-size:10px;color:#888;margin-top:2px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + safeLabel + '</div>' +
+    '<button style="margin-top:3px;width:100%;font-size:11px;padding:3px 0;border:1px solid #1890ff;background:#fff;color:#1890ff;border-radius:4px;cursor:pointer" ' +
+    'onclick=\'var b=this;b.disabled=true;b.textContent="...";saveImageToGallery(' + jsString(url) + ',b)\'>⬇ 保存</button>' +
     '</div>';
 }
 
@@ -593,9 +693,9 @@ function extractHost(url) {
   try { var u = new URL(url); return u.hostname; } catch(e) { return '外部图片'; }
 }
 
-/** Save an image URL to the gallery */
-async function saveImageToGallery(url) {
-  toast('正在导入图库...', 5000);
+/** Save an image URL to the gallery, with button state feedback */
+async function saveImageToGallery(url, btn) {
+  if (btn) { btn.disabled = true; btn.textContent = '...'; btn.style.color = '#999'; }
   try {
     var resp = await fetch('/api/gallery/import-url', {
       method: 'POST',
@@ -604,12 +704,15 @@ async function saveImageToGallery(url) {
     });
     var result = await resp.json();
     if (result.code === 0) {
-      toast('已保存到图库 [ID:' + result.data.id + ']', 4000);
+      if (btn) { btn.textContent = '✓'; btn.style.background = '#52c41a'; btn.style.color = '#fff'; btn.style.borderColor = '#52c41a'; btn.disabled = true; }
+      toast('已保存 [' + result.data.name + ']', 3000);
       loadGallery();
     } else {
+      if (btn) { btn.disabled = false; btn.textContent = '⬇ 保存'; btn.style.color = '#1890ff'; }
       toast('保存失败: ' + (result.message || '未知错误'), 4000);
     }
   } catch (e) {
+    if (btn) { btn.disabled = false; btn.textContent = '⬇ 保存'; btn.style.color = '#1890ff'; }
     toast('网络异常: ' + e.message, 4000);
   }
 }
@@ -698,6 +801,8 @@ function handleStreamEvent(event, assistantBubble, fullText) {
       }
       PROGRESS.style.display = 'none';
       MSG.scrollTop = MSG.scrollHeight;
+      loadGallery();
+      renderRefList();
       break;
     case 'image_candidates':
       showImageCandidates(event.data);
@@ -739,7 +844,7 @@ function showToolCall(label, type) {
 
   const body = document.createElement('div');
   body.className = 'tc-label';
-  body.innerHTML = renderImageUrls(escHtml(label || '工具调用中...'));
+  body.textContent = label || '工具调用中...';
   div.appendChild(body);
 
   MSG.appendChild(div);
@@ -811,6 +916,8 @@ function renderGallery(pictures) {
         <div class="overlay">${isSelected ? '&#10003;' : '&#9744;'}</div>
         <div class="meta">
           <div class="name" title="${escAttr(p.name || '未命名')}">${escHtml(p.name || '未命名')}</div>
+          <div class="mini-tags">${(p.tags||[]).slice(0,3).map(t => `<span class="mini-tag">${escHtml(t)}</span>`).join("")}${p.category ? `<span class="mini-tag" style="background:#f6ffed;color:#52c41a">${escHtml(p.category)}</span>` : ""}</div>
+          ${p.picWidth&&p.picHeight ? `<div class="mini-dim">${p.picWidth}&times;${p.picHeight} ${(p.picFormat||"").toUpperCase()}</div>` : ""}
           <div class="row">
             <span class="star${favClass ? ' ' + favClass : ''}" onclick="event.stopPropagation();toggleFavorite(${p.id})">${favClass ? '★' : '☆'}</span>
             <span class="analyze" onclick="event.stopPropagation();analyzePicture(${p.id})">分析</span>
@@ -1050,7 +1157,7 @@ async function doImportUrl() {
 
   const body = {
     imageUrl: imageUrl,
-    name: name || null,
+    name: name || '导入-' + Date.now(),
     introduction: null,
     category: category || null,
     tags: tags.length > 0 ? tags : null

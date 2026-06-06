@@ -20,8 +20,8 @@ public class LocalObjectStorageService implements ObjectStorageService {
 
     public LocalObjectStorageService(StorageProperties props) {
         this.root = props.local() != null && props.local().root() != null
-                ? Paths.get(props.local().root())
-                : Paths.get("gallery-data", "images");
+                ? Paths.get(props.local().root()).toAbsolutePath().normalize()
+                : Paths.get("gallery-data", "images").toAbsolutePath().normalize();
         try {
             Files.createDirectories(root);
         } catch (IOException e) {
@@ -29,10 +29,19 @@ public class LocalObjectStorageService implements ObjectStorageService {
         }
     }
 
+    /** Resolve and validate that the resulting path is within the storage root. */
+    private Path resolveSafe(String key) {
+        Path target = root.resolve(key).normalize();
+        if (!target.startsWith(root)) {
+            throw new RuntimeException("路径越界: " + key);
+        }
+        return target;
+    }
+
     @Override
     public StoredObject upload(byte[] bytes, String key, String contentType) {
         try {
-            Path target = root.resolve(key);
+            Path target = resolveSafe(key);
             Files.createDirectories(target.getParent());
             Files.write(target, bytes);
             String url = getUrl(key);
@@ -47,7 +56,7 @@ public class LocalObjectStorageService implements ObjectStorageService {
     @Override
     public byte[] download(String key) {
         try {
-            Path target = root.resolve(key);
+            Path target = resolveSafe(key);
             return Files.readAllBytes(target);
         } catch (IOException e) {
             log.warn("[LocalStorage] 下载失败 key={}", key, e);
@@ -58,7 +67,7 @@ public class LocalObjectStorageService implements ObjectStorageService {
     @Override
     public void delete(String key) {
         try {
-            Path target = root.resolve(key);
+            Path target = resolveSafe(key);
             Files.deleteIfExists(target);
             log.debug("[LocalStorage] 已删除 key={}", key);
         } catch (IOException e) {

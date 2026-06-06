@@ -133,11 +133,11 @@ public class RedisChatMemory implements ChatMemory {
 
         String key = key(conversationId);
 
-        // 2. 同步写 Redis（必须成功）
-        writeToRedis(key, records);
-
-        // 3. 截断 Redis List，只保留最近 maxMessages 条
-        redis.opsForList().trim(key, -maxMessages, -1);
+        // 2. 同步写 Redis（必须成功），用锁保证同一会话的 push+trim 原子性
+        synchronized (key.intern()) {
+            writeToRedis(key, records);
+            redis.opsForList().trim(key, -maxMessages, -1);
+        }
 
         // 3. 异步写 PostgreSQL（失败不阻塞）
         CompletableFuture.runAsync(() -> {
@@ -289,28 +289,26 @@ public class RedisChatMemory implements ChatMemory {
     }
 
     private ImageRef analyzeExternalImage(Media media) {
-        VisionAnalysisService vs = visionServiceProvider.getIfAvailable();
-        if (vs == null) {
-            return null;  // 没有视觉服务，跳过
-        }
-
-        try {
-            byte[] bytes = extractBytes(media);
-            if (bytes == null || bytes.length == 0) return null;
-
-            String base64 = "data:" + guessContentType(media) + ";base64,"
-                    + Base64.getEncoder().encodeToString(bytes);
-            VisionAnalysisResult result = vs.analyze("请简要描述这张图片的内容", base64, null);
-
-            String description = buildShortDescription(result);
-            if (description != null && !description.isBlank()) {
-                log.debug("[RedisChatMemory] 外部图片分析完成: {}", description);
-                return ImageRef.textDescription(description);
+        // Fire async analysis, return placeholder immediately (P3 fix)
+        CompletableFuture.runAsync(() -> {
+            VisionAnalysisService vs = visionServiceProvider.getIfAvailable();
+            if (vs == null) return;
+            try {
+                byte[] bytes = extractBytes(media);
+                if (bytes == null || bytes.length == 0) return;
+                String base64 = "data:" + guessContentType(media) + ";base64,"
+                        + Base64.getEncoder().encodeToString(bytes);
+                VisionAnalysisResult result = vs.analyze("请简要描述这张图片的内容", base64, null);
+                String description = buildShortDescription(result);
+                if (description != null && !description.isBlank()) {
+                    log.debug("[RedisChatMemory] 外部图片异步分析完成: {}", description);
+                }
+            } catch (Exception e) {
+                log.warn("[RedisChatMemory] 外部图片异步分析失败: {}", e.getMessage());
             }
-        } catch (Exception e) {
-            log.warn("[RedisChatMemory] 外部图片分析失败: {}", e.getMessage());
-        }
-        return null;
+        }, executor);
+
+        return ImageRef.textDescription("用户上传了一张图片");
     }
 
     private byte[] extractBytes(Media media) {

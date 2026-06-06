@@ -260,7 +260,48 @@ Advisor 内抛 `BusinessException` → `ExceptionGuardAdvisor`（order=MAX）兜
 |----|------|
 | **系统 JDK 是 1.8** | 所有 Maven 命令必须加 `JAVA_HOME="D:/develop/java/JDK/jdk-21"`，否则编译失败 |
 | **Spring AI 1.0.0 GA API 破坏性变化** | M6→GA 全量重命名：`CallAroundAdvisor`→`CallAdvisor`，`AdvisedRequest`→`ChatClientRequest`，`AdvisedResponse`→`ChatClientResponse`，链方法 `nextAroundCall`→`nextCall`，`MessageChatMemoryAdvisor` 构造器→Builder 模式，`InMemoryChatMemory`→`MessageWindowChatMemory`+`InMemoryChatMemoryRepository`，`Media` 移到 `org.springframework.ai.content`，`CallAdvisorChain`/`StreamAdvisorChain` 不再是函数式接口（多了 `getCallAdvisors()`/`getStreamAdvisors()` 方法），`ChatMemory` 新增 `get(String)` 抽象方法 |
-| **onErrorResume 顺序** | 流式异常处理必须 `.onErrorResume(BusinessException.class, ...)` 在前、`.onErrorResume(e -> ...)` 在后，否则子类被父类吞掉 |
+| **onErrorResume 顺序** | 流式异常处理必须 `.onErrorResume(BusinessException.class, ...)` 在前、`.onErrorResume(e -> ...)` 在后，否则子类被父类吞掉
+
+## Agent 架构
+
+### 当前方案：Spring AI 自动工具执行 + Agent 壳层
+
+```
+ChatServiceImpl (编排角色)
+  ├─ 预处理：autoSaveToCacheGallery / buildUserText / createMedia / toolContext
+  ├─ 委托 Agent.run() / Agent.streamRaw()
+  │    ├─ AgentContext (IDLE→RUNNING→FINISHED/ERROR)
+  │    ├─ AgentTraceAdvisor (order=5, 轮次观测)
+  │    └─ ChatClient (Spring AI 多步工具执行)
+  │         └─ Advisor 链: ContentGuard(0) → AgentTrace(5) → MCMA → Logging(30) → ExceptionGuard(MAX)
+  └─ 后处理：guardHallucinatedImageResult / ChatResponseVO 构建
+```
+
+核心原则：**意图由模型判断，结果由后端确认**。Agent 不重写工具执行循环（Spring AI 已成熟），而是在 Advisor 层补充状态管理、步数控制、可观测性。任务交付验收由 `ToolProgressContext`（Phase A）+ 后续 `TaskVerifier`（Phase C）负责。
+
+### 后续深入学习方向：手动 ReAct 循环
+
+参考项目 `yu-ai-agent-master`（`D:\code\java\yu-ai-agent-master`）实现了完整的手动 ReAct Agent：
+
+- `BaseAgent` → `ReActAgent` → `ToolCallAgent` → `YuManus` 四层继承
+- 状态机：IDLE → RUNNING → FINISHED/ERROR
+- 禁用 Spring AI 自动工具执行（`internalToolExecutionEnabled=false`）
+- 手动 `think()` → `act()` 循环，每步可注入 `nextStepPrompt` 转向引导
+- `TerminateTool` 作为退出信号
+- 手动管理 `List<Message>` 消息历史（替换 Spring AI ChatMemory）
+- `maxSteps=20` 防止无限循环
+
+两种模式对比：
+
+| 维度 | 当前方案（自动执行 + Agent 壳） | 手动 ReAct（yu-ai-agent） |
+|------|-------------------------------|--------------------------|
+| 工具执行 | Spring AI 自动 | 手动 think-act 循环 |
+| 代码量 | 少（~500 行 Agent 层） | 多（~800 行完整实现） |
+| 每步控制 | Advisor 层观测 | 完全控制（注入 prompt / 终止） |
+| 流式支持 | 原生支持 | 需自行用 SseEmitter 封装 |
+| 适用场景 | 大多数 Tool Calling 任务 | 需要精确控制每步的场景 |
+
+后续深入学习时可尝试将当前项目改为手动 ReAct 模式，对比两种方案的优劣。 |
 | **test profile 隔离** | AI 相关 Bean 标注 `@Profile("!test")`，test profile 需排除 DataSource/Flyway/OpenAI 全家桶自动配置，并设 `spring.ai.openai.api-key: test-fake-key` |
 | **ChatClientMessageAggregator 替代 MessageAggregator** | 1.0.0 GA 新增 `ChatClientMessageAggregator`（`spring-ai-client-chat`），`MessageAggregator`（`spring-ai-model`）降级为处理裸 `ChatResponse`。LoggingAdvisor 已迁移到新 API |
 | **Chain 不再是函数式接口** | `CallAdvisorChain`/`StreamAdvisorChain` 在 1.0.0 各有 2 个抽象方法，测试中不能再 `chain -> response` lambda，须用 `mock(CallAdvisorChain.class)` |
@@ -394,6 +435,9 @@ public interface ImageGenerationService {
 - [x] **会话窗口消息数限制**（`ChatMemoryProperties.maxConversationMessages` 默认 200，`PictureApp` 入口调用 `ChatHistoryRepository.countByConversation()` 校验，超限抛 BusinessException）
 - [x] **Redis List trim 截断**（`RedisChatMemory.add()` 末尾 `trim(key, -maxMessages, -1)` 确保列表不无限增长）
 - [x] **PostgreSQL 默认化 + 经典 RAG 清理**（2026-06：删除 `GalleryRagRetriever`/`SimpleVectorStore`/`SimpleVectorIndexService`/JSON文件存储/`NoopChatHistoryRepository`/`VectorStorePersistence`；PG 配置合并到 `application.yml`；`@Profile("postgres")` → `@Profile("!test")`；删除 `@Primary`；`RagServiceImpl` 始终走增强检索；`PostgresAutoConfig` 按需导入 DataSource）
+- [x] **Pexels 图片搜索 @Tool 集成**（`PexelsSearchTools`：搜索/精选/下载入库/详情 4 工具，预留 `PexelsPhotoService` 接口支持后续 MCP 抽离）
+- [x] **Agent 核心框架 Phase A+B**（2026-06-05：`Agent` + `AgentConfig` + `AgentState` + `AgentContext` + `AgentTraceAdvisor`；ChatServiceImpl 委托 Agent 执行；system prompt 升级为推理框架+交付规则+终止条件；幻觉拦截改以 trace 为唯一权威；`ToolProgressContext` 工具计数+分类上限；生图保存失败不静默；CLAUDE.md 记录手动 ReAct 循环作为后续学习方向）
+- [ ] **Agent Phase C：任务验收层**（TaskLedger + TaskVerifier + ResponseComposer）
 
 ## 测试分类
 

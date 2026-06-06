@@ -85,6 +85,11 @@ app:
     read-timeout-seconds: 30
     search-max-results: 5
     max-download-count: 3
+  agent:
+    max-tool-calls-per-turn: 8
+    max-generation-calls-per-turn: 1
+    max-download-calls-per-turn: 5
+    max-search-calls-per-turn: 3
 
 zhipu:
   api-key: ${ZHIPU_API_KEY:}

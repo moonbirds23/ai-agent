@@ -1,5 +1,6 @@
 package com.zzp.aiagent.domain.pexels;
 
+import com.zzp.aiagent.common.UrlSecurityValidator;
 import org.junit.jupiter.api.DisplayName;
 import com.zzp.aiagent.tool.PexelsSearchTools;
 import org.junit.jupiter.api.Nested;
@@ -65,7 +66,7 @@ class PexelsPhotoServiceImplTest {
                     new com.zzp.aiagent.domain.web.WebProperties(
                             true, 10, 30, 2_097_152, 20_971_520,
                             "test-agent", 5, 3000, "", 0,
-                            false, false, false, 0.15));
+                            false, false, false, 0.15), new UrlSecurityValidator());
 
             PexelsPhoto photo = impl.parsePhoto(json);
 
@@ -110,7 +111,7 @@ class PexelsPhotoServiceImplTest {
                     new PexelsProperties("k", 10, 30, 5, 3),
                     new com.zzp.aiagent.domain.web.WebProperties(
                             true, 10, 30, 2_097_152, 20_971_520,
-                            "test", 5, 3000, "", 0, false, false, false, 0.15));
+                            "test", 5, 3000, "", 0, false, false, false, 0.15), new UrlSecurityValidator());
 
             PexelsPhoto photo = impl.parsePhoto(json);
 
@@ -133,7 +134,7 @@ class PexelsPhotoServiceImplTest {
                     new PexelsProperties("k", 10, 30, 5, 3),
                     new com.zzp.aiagent.domain.web.WebProperties(
                             true, 10, 30, 2_097_152, 20_971_520,
-                            "test", 5, 3000, "", 0, false, false, false, 0.15));
+                            "test", 5, 3000, "", 0, false, false, false, 0.15), new UrlSecurityValidator());
 
             PexelsPhoto photo = impl.parsePhoto(json);
 
@@ -219,7 +220,7 @@ class PexelsPhotoServiceImplTest {
                     new PexelsProperties("k", 10, 30, 5, 3),
                     new com.zzp.aiagent.domain.web.WebProperties(
                             true, 10, 30, 2_097_152, 20_971_520,
-                            "test", 5, 3000, "", 0, false, false, false, 0.15));
+                            "test", 5, 3000, "", 0, false, false, false, 0.15), new UrlSecurityValidator());
 
             // Use parsePhoto for individual photos; the array splitting
             // is tested implicitly via the bracket matching tests above.

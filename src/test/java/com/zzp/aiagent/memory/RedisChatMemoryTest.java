@@ -307,7 +307,7 @@ class RedisChatMemoryTest {
     }
 
     @Test
-    @DisplayName("resolveImageRef → 非 gallery URI → 无 Vision 服务时返回 null")
+    @DisplayName("resolveImageRef → 非 gallery URI → 返回占位文本（异步分析不阻塞）")
     void resolveImageRef_externalUrl_noVision_returnsNull() throws Exception {
         when(listOps.rightPushAll(anyString(), ArgumentMatchers.<String>anyCollection())).thenReturn(1L);
         when(listOps.size(anyString())).thenReturn(null);
@@ -320,7 +320,9 @@ class RedisChatMemoryTest {
         memory.add("chat-1", List.of(userMsg));
 
         String json = capturePush("chat:memory:chat-1").iterator().next();
-        assertThat(json).doesNotContain("imageRefs");
+        // P3 fix: 外部图片立即返回占位文本，不再同步等待视觉分析
+        assertThat(json).contains("imageRefs");
+        assertThat(json).contains("用户上传了一张图片");
     }
 
     // ── clear ─────────────────────────────────────────────────

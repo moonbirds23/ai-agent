@@ -27,6 +27,15 @@ public interface GalleryService {
     /** Download original picture bytes from object storage. */
     byte[] downloadPicture(Long pictureId);
 
-    /** Keyword-based search for fallback when vector search is unavailable. */
-    List<GalleryPicture> searchByKeyword(String query, int limit);
+    /**
+     * Search gallery pictures via hybrid retrieval (vector + keyword + metadata).
+     * Delegates to {@link HybridGalleryRetriever#retrieve} for relevance-ranked results.
+     */
+    List<GalleryPicture> search(String query, int limit);
+
+    /**
+     * Update a picture's metadata (name, introduction, category, tags).
+     * Only non-null, non-blank fields are updated.
+     */
+    GalleryPicture update(Long id, String name, String introduction, String category, List<String> tags);
 }

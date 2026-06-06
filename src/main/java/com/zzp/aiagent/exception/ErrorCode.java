@@ -14,6 +14,7 @@ public enum ErrorCode {
     AI_RATE_LIMIT(50001, "AI 服务请求过于频繁"),
     AI_TIMEOUT(50002, "AI 服务响应超时"),
     AI_MODEL_UNAVAILABLE(50003, "AI 模型暂不可用"),
+    AGENT_MAX_STEPS_EXCEEDED(50004, "Agent 执行步数超限"),
     MEMORY_ERROR(50010, "对话记忆异常"),
     IMAGE_TOO_LARGE(40201, "图片尺寸超过限制"),
     IMAGE_FORMAT_INVALID(40202, "不支持的图片格式"),

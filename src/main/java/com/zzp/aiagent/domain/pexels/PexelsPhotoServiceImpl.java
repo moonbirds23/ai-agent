@@ -1,5 +1,6 @@
 package com.zzp.aiagent.domain.pexels;
 
+import com.zzp.aiagent.common.UrlSecurityValidator;
 import com.zzp.aiagent.domain.web.WebProperties;
 import com.zzp.aiagent.exception.BusinessException;
 import com.zzp.aiagent.exception.ErrorCode;
@@ -41,9 +42,12 @@ public class PexelsPhotoServiceImpl implements PexelsPhotoService {
 
     private final HttpClient httpClient;
     private final PexelsProperties props;
+    private final UrlSecurityValidator urlValidator;
 
-    public PexelsPhotoServiceImpl(PexelsProperties props, WebProperties webProps) {
+    public PexelsPhotoServiceImpl(PexelsProperties props, WebProperties webProps,
+                                  UrlSecurityValidator urlValidator) {
         this.props = props;
+        this.urlValidator = urlValidator;
         var builder = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(props.connectTimeoutSeconds() > 0
                         ? props.connectTimeoutSeconds() : 10))
@@ -102,7 +106,8 @@ public class PexelsPhotoServiceImpl implements PexelsPhotoService {
     @Override
     public byte[] downloadPhoto(String imageUrl) {
         try {
-            URI uri = URI.create(imageUrl);
+            // SSRF protection — validate URL before connecting
+            URI uri = urlValidator.validate(imageUrl);
             HttpRequest request = HttpRequest.newBuilder(uri)
                     .timeout(Duration.ofSeconds(props.readTimeoutSeconds() > 0
                             ? props.readTimeoutSeconds() : 30))

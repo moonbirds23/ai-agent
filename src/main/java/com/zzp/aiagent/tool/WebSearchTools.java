@@ -11,6 +11,8 @@ import com.zzp.aiagent.model.entity.GalleryPicture;
 import com.zzp.aiagent.model.enums.StorageLocation;
 import com.zzp.aiagent.model.vo.ImageCandidateVO;
 import com.zzp.aiagent.model.vo.ImageCandidatesEventVO;
+import com.zzp.aiagent.agent.task.TaskLedger;
+import com.zzp.aiagent.agent.task.ToolExecutionRecord;
 import com.zzp.aiagent.service.GalleryService;
 import lombok.extern.slf4j.Slf4j;
 import org.jsoup.Jsoup;
@@ -73,15 +75,18 @@ public class WebSearchTools {
     private final GalleryService galleryService;
     private final WebProperties props;
     private final ToolProgressContext progressContext;
+    private final TaskLedger taskLedger;
 
     public WebSearchTools(UrlSecurityValidator urlValidator,
                           GalleryService galleryService,
                           WebProperties props,
-                          ToolProgressContext progressContext) {
+                          ToolProgressContext progressContext,
+                          TaskLedger taskLedger) {
         this.urlValidator = urlValidator;
         this.galleryService = galleryService;
         this.props = props;
         this.progressContext = progressContext;
+        this.taskLedger = taskLedger;
         var clientBuilder = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(props.connectTimeoutSeconds()))
                 .followRedirects(HttpClient.Redirect.NEVER);
@@ -114,16 +119,21 @@ public class WebSearchTools {
         progressContext.start(toolContext, "webSearch", "正在搜索网页：" + query);
         int n = Math.clamp(limit != null ? limit : props.searchMaxResults(), 1, 10);
         String src = normalizeSource(source);
+        String turnId = currentTurnId(toolContext);
+        Map<String, Object> input = Map.of("query", query, "limit", n, "source", src);
+        taskLedger.beforeCall(turnId, "webSearch", input);
 
         if ("auto".equals(src) || "international".equals(src)) {
             try {
                 String result = doSearch(query, n, "www.bing.com", true, "Bing 国际版");
                 progressContext.done(toolContext, "webSearch", "网页搜索完成：" + query);
+                taskLedger.recordSuccess(turnId, "webSearch", input, Map.of(), ToolExecutionRecord.WEB_FETCHED);
                 return result;
             } catch (Exception e) {
                 log.warn("[WebSearch] 国际版搜索失败, query={}: {}", query, e.getMessage());
                 if ("international".equals(src)) {
                     progressContext.fail(toolContext, "webSearch", e.getMessage());
+                    taskLedger.recordFailure(turnId, "webSearch", input, e.getMessage());
                     return "Bing 国际版搜索失败（需代理）: " + e.getMessage() + "。可尝试 source=domestic 使用国内搜索。";
                 }
                 progressContext.progress(toolContext, "国际版网页搜索失败，尝试国内版");
@@ -134,10 +144,12 @@ public class WebSearchTools {
             try {
                 String result = doSearch(query, n, "cn.bing.com", false, "Bing 国内版");
                 progressContext.done(toolContext, "webSearch", "网页搜索完成：" + query);
+                taskLedger.recordSuccess(turnId, "webSearch", input, Map.of(), ToolExecutionRecord.WEB_FETCHED);
                 return result;
             } catch (Exception e) {
                 log.error("[WebSearch] 国内版搜索失败 query={}: {}", query, e.getMessage());
                 progressContext.fail(toolContext, "webSearch", e.getMessage());
+                taskLedger.recordFailure(turnId, "webSearch", input, e.getMessage());
                 return "搜索失败: " + e.getMessage() + "。请稍后重试。";
             }
         }
@@ -211,10 +223,14 @@ public class WebSearchTools {
         int n = Math.clamp(limit != null ? limit : props.searchMaxResults(), 1, 10);
         String normalizedSource = normalizeSource(source);
         progressContext.start(toolContext, "imageSearch", "正在搜索网络图片：" + query);
+        String turnId = currentTurnId(toolContext);
+        Map<String, Object> input = Map.of("query", query, "limit", n, "source", normalizedSource);
+        taskLedger.beforeCall(turnId, "imageSearch", input);
         List<ImageCandidate> candidates = searchImageCandidatesAuto(query, n, normalizedSource, toolContext);
 
         if (candidates.isEmpty()) {
             progressContext.done(toolContext, "imageSearch", "未找到可展示的网络图片候选：" + query);
+            taskLedger.recordSuccess(turnId, "imageSearch", input, Map.of("candidateCount", 0), ToolExecutionRecord.NONE);
             return "未找到与「" + query + "」相关的图片候选。请尝试更具体的搜索词。";
         }
 
@@ -223,6 +239,8 @@ public class WebSearchTools {
                 .toList();
         progressContext.imageCandidates(toolContext, new ImageCandidatesEventVO(query, normalizedSource, candidateVOs));
         progressContext.done(toolContext, "imageSearch", "找到 " + candidates.size() + " 个网络图片候选");
+        Map<String, Object> output = Map.of("candidateCount", candidates.size());
+        taskLedger.recordSuccess(turnId, "imageSearch", input, output, ToolExecutionRecord.IMAGE_CANDIDATES_RETURNED);
         return "已找到 " + candidates.size() + " 个与「" + query
                 + "」相关的网络图片候选，并已在界面中展示。请简要说明搜索结果，不要重复列出图片 URL。";
     }
@@ -245,6 +263,9 @@ public class WebSearchTools {
 
         progressContext.start(toolContext, "webFetch", "正在抓取网页：" + url);
         int max = Math.clamp(maxChars != null ? maxChars : props.fetchMaxChars(), 1, 8000);
+        String turnId = currentTurnId(toolContext);
+        Map<String, Object> input = Map.of("url", url, "maxChars", max);
+        taskLedger.beforeCall(turnId, "webFetch", input);
         try {
             urlValidator.validate(url);
             String html = fetchString(url, props.maxFetchBytes());
@@ -259,14 +280,17 @@ public class WebSearchTools {
             }
             sb.append(text);
             progressContext.done(toolContext, "webFetch", "网页抓取完成");
+            taskLedger.recordSuccess(turnId, "webFetch", input, Map.of(), ToolExecutionRecord.WEB_FETCHED);
             return sb.toString();
 
         } catch (BusinessException e) {
             progressContext.fail(toolContext, "webFetch", e.getMessage());
+            taskLedger.recordFailure(turnId, "webFetch", input, e.getMessage());
             throw e;
         } catch (Exception e) {
             log.error("[WebFetch] 抓取失败 url={}", url, e);
             progressContext.fail(toolContext, "webFetch", e.getMessage());
+            taskLedger.recordFailure(turnId, "webFetch", input, e.getMessage());
             return "网页抓取失败：" + e.getMessage();
         }
     }
@@ -288,6 +312,9 @@ public class WebSearchTools {
             ToolContext toolContext) {
 
         progressContext.start(toolContext, "downloadImage", "正在下载图片：" + imageUrl);
+        String turnId = currentTurnId(toolContext);
+        Map<String, Object> input = Map.of("imageUrl", imageUrl, "name", name != null ? name : "");
+        taskLedger.beforeCall(turnId, "downloadImage", input);
         try {
             URI uri = urlValidator.validate(imageUrl);
             byte[] bytes = downloadBytes(uri, 0, props.maxDownloadBytes());
@@ -304,14 +331,18 @@ public class WebSearchTools {
 
             log.info("[WebSearch] 图片下载入库 pictureId={} name={} url={}", saved.id(), saved.name(), imageUrl);
             progressContext.done(toolContext, "downloadImage", "图片已下载入库 [ID:" + saved.id() + "] " + saved.name());
+            Map<String, Object> output = Map.of("pictureId", saved.id(), "pictureName", saved.name());
+            taskLedger.recordSuccess(turnId, "downloadImage", input, output, ToolExecutionRecord.GALLERY_CREATED);
             return "图片已下载并保存到图库 [ID:" + saved.id() + "] " + saved.name();
 
         } catch (BusinessException e) {
             progressContext.fail(toolContext, "downloadImage", e.getMessage());
+            taskLedger.recordFailure(turnId, "downloadImage", input, e.getMessage());
             throw e;
         } catch (Exception e) {
             log.error("[WebSearch] 图片下载失败 url={}", imageUrl, e);
             progressContext.fail(toolContext, "downloadImage", e.getMessage());
+            taskLedger.recordFailure(turnId, "downloadImage", input, e.getMessage());
             return "图片下载失败：" + e.getMessage();
         }
     }
@@ -334,6 +365,9 @@ public class WebSearchTools {
 
         int n = Math.clamp(count != null ? count : 3, 1, 5);
         progressContext.start(toolContext, "searchAndDownload", "正在搜索并下载网络图片：" + query + "，目标 " + n + " 张");
+        String turnId = currentTurnId(toolContext);
+        Map<String, Object> input = Map.of("query", query, "count", n);
+        taskLedger.beforeCall(turnId, "searchAndDownload", input);
         List<ImageCandidate> candidates = searchImageCandidatesAuto(query, Math.min(n * 5, 20), "auto", toolContext);
         progressContext.progress(toolContext, "找到 " + candidates.size() + " 个图片候选，开始下载");
 
@@ -369,6 +403,8 @@ public class WebSearchTools {
         }
 
         progressContext.done(toolContext, "searchAndDownload", "已下载 " + saved.size() + " 张图片入库");
+        Map<String, Object> output = Map.of("savedCount", saved.size());
+        taskLedger.recordSuccess(turnId, "searchAndDownload", input, output, ToolExecutionRecord.GALLERY_CREATED);
         StringBuilder sb = new StringBuilder("已从网络搜索「").append(query)
                 .append("」并下载 ").append(saved.size()).append(" 张图片入库：\n");
         for (String s : saved) {
@@ -705,6 +741,9 @@ public class WebSearchTools {
             ToolContext toolContext) {
 
         progressContext.start(toolContext, "importImage", "正在导入网络图片：" + url);
+        String turnId = currentTurnId(toolContext);
+        Map<String, Object> input = Map.of("url", url, "name", name != null ? name : "", "category", category != null ? category : "");
+        taskLedger.beforeCall(turnId, "importImage", input);
         try {
             urlValidator.validate(url);
             List<String> tagList = (tags != null && !tags.isBlank())
@@ -717,13 +756,17 @@ public class WebSearchTools {
 
             log.info("[WebSearch] 图片URL导入 pictureId={} name={}", saved.id(), saved.name());
             progressContext.done(toolContext, "importImage", "图片已导入图库 [ID:" + saved.id() + "] " + saved.name());
+            Map<String, Object> output = Map.of("pictureId", saved.id(), "pictureName", saved.name());
+            taskLedger.recordSuccess(turnId, "importImage", input, output, ToolExecutionRecord.GALLERY_CREATED);
             return "图片已从 URL 导入图库 [ID:" + saved.id() + "] " + saved.name();
         } catch (BusinessException e) {
             progressContext.fail(toolContext, "importImage", e.getMessage());
+            taskLedger.recordFailure(turnId, "importImage", input, e.getMessage());
             throw e;
         } catch (Exception e) {
             log.error("[WebSearch] URL导入失败 url={}", url, e);
             progressContext.fail(toolContext, "importImage", e.getMessage());
+            taskLedger.recordFailure(turnId, "importImage", input, e.getMessage());
             return "图片导入失败：" + e.getMessage();
         }
     }
@@ -906,6 +949,12 @@ public class WebSearchTools {
             }
         }
         return value.toString().strip();
+    }
+
+    private static String currentTurnId(ToolContext toolContext) {
+        if (toolContext == null || toolContext.getContext() == null) return null;
+        Object value = toolContext.getContext().get("turnId");
+        return value instanceof String text ? text : null;
     }
 
     private record SearchResult(String title, String url, String snippet) {}

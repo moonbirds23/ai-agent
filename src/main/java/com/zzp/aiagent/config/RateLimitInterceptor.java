@@ -54,6 +54,12 @@ public class RateLimitInterceptor implements HandlerInterceptor {
         synchronized (timestamps) {
             timestamps.removeIf(t -> now - t > WINDOW_MS);
 
+            // Evict empty entries to prevent unbounded map growth
+            if (timestamps.isEmpty()) {
+                counter.remove(key);
+                return true;
+            }
+
             if (timestamps.size() >= limit) {
                 log.warn("[RateLimit] 触发限流 ip={} uri={} count={} limit={}",
                         ip, uri, timestamps.size(), limit);

@@ -38,6 +38,9 @@ application-local.yml
 ### Gallery data ###
 gallery-data/
 
+### Claude Code ###
+.claude/
+
 ### Personal docs & notes ###
 docs/
 mianshiTest.md

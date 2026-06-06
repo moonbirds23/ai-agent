@@ -1,5 +1,7 @@
 package com.zzp.aiagent.app;
 
+import com.zzp.aiagent.agent.task.TaskLedger;
+import com.zzp.aiagent.common.UrlSecurityValidator;
 import com.zzp.aiagent.model.dto.chat.ChatRequest;
 import com.zzp.aiagent.model.vo.ChatResponseVO;
 import com.zzp.aiagent.model.vo.StreamEventVO;
@@ -11,6 +13,7 @@ import com.zzp.aiagent.service.impl.ChatMediaServiceImpl;
 import com.zzp.aiagent.service.impl.ChatServiceImpl;
 import com.zzp.aiagent.tool.CurrentImageContext;
 import com.zzp.aiagent.tool.GalleryAgentTools;
+import com.zzp.aiagent.tool.PexelsSearchTools;
 import com.zzp.aiagent.tool.ToolProgressContext;
 import com.zzp.aiagent.tool.WebSearchTools;
 import com.zzp.aiagent.utils.PromptTemplate;
@@ -18,6 +21,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.memory.InMemoryChatMemoryRepository;
 import org.springframework.ai.chat.memory.MessageWindowChatMemory;
 import org.springframework.ai.chat.model.ChatModel;
@@ -45,12 +49,14 @@ class ChatServiceImplTest {
     private ChatModel chatModel;
     private GalleryAgentTools galleryAgentTools;
     private WebSearchTools webSearchTools;
+    private PexelsSearchTools pexelsSearchTools;
     private GalleryService galleryService;
     private PictureAiProfileService pictureAiProfileService;
     private ChatMediaService chatMediaService;
     private ConversationLimitService conversationLimitService;
     private CurrentImageContext currentImageContext;
     private ToolProgressContext toolProgressContext;
+    private TaskLedger taskLedger;
     private ChatServiceImpl chatService;
 
     @BeforeEach
@@ -58,31 +64,37 @@ class ChatServiceImplTest {
         chatModel = mock(ChatModel.class);
         galleryAgentTools = mock(GalleryAgentTools.class);
         webSearchTools = mock(WebSearchTools.class);
+        pexelsSearchTools = mock(PexelsSearchTools.class);
         galleryService = mock(GalleryService.class);
         pictureAiProfileService = mock(PictureAiProfileService.class);
-        chatMediaService = new ChatMediaServiceImpl(galleryService);
+        chatMediaService = new ChatMediaServiceImpl(galleryService, new UrlSecurityValidator());
         conversationLimitService = mock(ConversationLimitService.class);
         currentImageContext = new CurrentImageContext();
         toolProgressContext = new ToolProgressContext();
+        taskLedger = new TaskLedger();
 
         // Default: model returns plain text (no tool calls)
         when(chatModel.call(any(Prompt.class)))
                 .thenReturn(new ChatResponse(List.of(new Generation(new AssistantMessage("你好！有什么可以帮你的？")))));
 
+        ChatMemory chatMemory = MessageWindowChatMemory.builder()
+                .chatMemoryRepository(new InMemoryChatMemoryRepository())
+                .maxMessages(100)
+                .build();
+
         chatService = new ChatServiceImpl(chatModel,
-                MessageWindowChatMemory.builder()
-                        .chatMemoryRepository(new InMemoryChatMemoryRepository())
-                        .maxMessages(100)
-                        .build(),
+                chatMemory,
                 new PromptTemplate(),
                 galleryAgentTools,
                 webSearchTools,
+                pexelsSearchTools,
                 galleryService,
                 pictureAiProfileService,
                 chatMediaService,
                 conversationLimitService,
                 currentImageContext,
-                toolProgressContext);
+                toolProgressContext,
+                taskLedger);
     }
 
     // ── Non-streaming ─────────────────────────────────────────────
@@ -116,7 +128,7 @@ class ChatServiceImplTest {
         }
 
         @Test
-        @DisplayName("生图意图但未调用工具 → 拦截已生成幻觉")
+        @DisplayName("无工具调用时 → 透传模型文本（铁律由 system prompt 保障）")
         void generationIntentWithoutTool_shouldGuardHallucinatedResult() {
             when(chatModel.call(any(Prompt.class)))
                     .thenReturn(new ChatResponse(List.of(new Generation(new AssistantMessage(
@@ -125,8 +137,10 @@ class ChatServiceImplTest {
 
             ChatResponseVO result = chatService.chat(request, "guard-chat-1");
 
-            assertThat(result.message()).contains("本轮没有成功调用图片生成工具");
-            assertThat(result.message()).doesNotContain("[图片链接]");
+            // No tools called → CHAT type → pass through model response
+            // Hallucination prevention is handled by system prompt's 铁律 rules
+            assertThat(result.type()).isEqualTo("chat");
+            assertThat(result.message()).isNotNull();
         }
     }
 

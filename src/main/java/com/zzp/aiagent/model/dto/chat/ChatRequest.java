@@ -8,6 +8,7 @@ import java.util.List;
 @Schema(description = "对话请求")
 public record ChatRequest(
         @Schema(description = "用户消息", example = "帮我生成一张冬日雪景图")
+        @Size(max = 10000, message = "消息长度不能超过 10000 字符")
         String message,
 
         @Schema(description = "会话ID，不传则自动生成", example = "550e8400-e29b-41d4-a716-446655440000")

@@ -5,6 +5,7 @@ import com.zzp.aiagent.common.ResultUtils;
 import com.zzp.aiagent.service.GalleryService;
 import com.zzp.aiagent.domain.gallery.GalleryImportUrlRequest;
 import com.zzp.aiagent.domain.gallery.GalleryPageResult;
+import com.zzp.aiagent.domain.gallery.GalleryUpdateRequest;
 import com.zzp.aiagent.model.entity.GalleryPicture;
 import com.zzp.aiagent.domain.gallery.GalleryQueryRequest;
 import com.zzp.aiagent.domain.gallery.GalleryUploadRequest;
@@ -26,6 +27,7 @@ import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -79,6 +81,14 @@ public class GalleryController {
     public BaseResponse<GalleryPicture> favorite(@PathVariable Long id,
                                                   @RequestParam(defaultValue = "true") boolean favorited) {
         return ResultUtils.success(galleryService.favorite(id, favorited));
+    }
+
+    @PutMapping("/{id}")
+    @Operation(summary = "更新图片元数据", description = "更新图片的名称、简介、分类和标签")
+    public BaseResponse<GalleryPicture> update(@PathVariable Long id,
+                                                @RequestBody GalleryUpdateRequest request) {
+        return ResultUtils.success(galleryService.update(id,
+                request.name(), request.introduction(), request.category(), request.tags()));
     }
 
     @DeleteMapping("/{id}")

@@ -22,6 +22,10 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+
+import com.zzp.aiagent.agent.task.TaskLedger;
+import com.zzp.aiagent.agent.task.ToolExecutionRecord;
 
 /**
  * Pexels stock photo search tools for AI Agent.
@@ -41,13 +45,16 @@ public class PexelsSearchTools {
     private final PexelsPhotoService pexelsPhotoService;
     private final GalleryService galleryService;
     private final ToolProgressContext progressContext;
+    private final TaskLedger taskLedger;
 
     public PexelsSearchTools(PexelsPhotoService pexelsPhotoService,
                              GalleryService galleryService,
-                             ToolProgressContext progressContext) {
+                             ToolProgressContext progressContext,
+                             TaskLedger taskLedger) {
         this.pexelsPhotoService = pexelsPhotoService;
         this.galleryService = galleryService;
         this.progressContext = progressContext;
+        this.taskLedger = taskLedger;
     }
 
     // ── 搜索参考图（不入库）───────────────────────────────────────────
@@ -80,6 +87,9 @@ public class PexelsSearchTools {
 
         int perPage = Math.clamp(limit != null ? limit : 5, 1, 10);
         progressContext.start(toolContext, "pexelsSearchPhotos", "正在搜索 Pexels 图库：" + query);
+        String turnId = currentTurnId(toolContext);
+        Map<String, Object> input = Map.of("query", query, "perPage", perPage, "orientation", orientation != null ? orientation : "", "color", color != null ? color : "");
+        taskLedger.beforeCall(turnId, "pexelsSearchPhotos", input);
 
         try {
             PexelsSearchRequest request = new PexelsSearchRequest(
@@ -87,6 +97,7 @@ public class PexelsSearchTools {
             PexelsSearchResult result = pexelsPhotoService.search(request);
 
             if (result.photos().isEmpty()) {
+                taskLedger.recordSuccess(turnId, "pexelsSearchPhotos", input, Map.of("candidateCount", 0), ToolExecutionRecord.NONE);
                 progressContext.done(toolContext, "pexelsSearchPhotos",
                         "Pexels 未找到与「" + query + "」相关的图片");
                 return "Pexels 未找到与「" + query + "」相关的图片。请尝试更具体或不同的搜索词。";
@@ -121,11 +132,14 @@ public class PexelsSearchTools {
 
             progressContext.done(toolContext, "pexelsSearchPhotos",
                     "已找到 " + result.photos().size() + " 张 Pexels 图片");
+            Map<String, Object> output = Map.of("candidateCount", result.photos().size(), "totalResults", result.totalResults());
+            taskLedger.recordSuccess(turnId, "pexelsSearchPhotos", input, output, ToolExecutionRecord.IMAGE_CANDIDATES_RETURNED);
             return sb.toString();
 
         } catch (Exception e) {
             log.error("[PexelsTools] 搜索失败 query={}", query, e);
             progressContext.fail(toolContext, "pexelsSearchPhotos", e.getMessage());
+            taskLedger.recordFailure(turnId, "pexelsSearchPhotos", input, e.getMessage());
             return "Pexels 图片搜索失败：" + e.getMessage();
         }
     }
@@ -146,11 +160,15 @@ public class PexelsSearchTools {
 
         int perPage = Math.clamp(limit != null ? limit : 5, 1, 10);
         progressContext.start(toolContext, "pexelsCuratedPhotos", "正在浏览 Pexels 精选照片");
+        String turnId = currentTurnId(toolContext);
+        Map<String, Object> input = Map.of("perPage", perPage);
+        taskLedger.beforeCall(turnId, "pexelsCuratedPhotos", input);
 
         try {
             PexelsSearchResult result = pexelsPhotoService.curated(perPage, 1);
 
             if (result.photos().isEmpty()) {
+                taskLedger.recordSuccess(turnId, "pexelsCuratedPhotos", input, Map.of("candidateCount", 0), ToolExecutionRecord.NONE);
                 progressContext.done(toolContext, "pexelsCuratedPhotos", "Pexels 暂无精选照片");
                 return "Pexels 暂无精选照片，请稍后再试。";
             }
@@ -176,11 +194,13 @@ public class PexelsSearchTools {
 
             progressContext.done(toolContext, "pexelsCuratedPhotos",
                     "已浏览 " + result.photos().size() + " 张精选照片");
+            taskLedger.recordSuccess(turnId, "pexelsCuratedPhotos", input, Map.of("candidateCount", result.photos().size()), ToolExecutionRecord.IMAGE_CANDIDATES_RETURNED);
             return sb.toString();
 
         } catch (Exception e) {
             log.error("[PexelsTools] 精选照片获取失败", e);
             progressContext.fail(toolContext, "pexelsCuratedPhotos", e.getMessage());
+            taskLedger.recordFailure(turnId, "pexelsCuratedPhotos", input, e.getMessage());
             return "Pexels 精选照片获取失败：" + e.getMessage();
         }
     }
@@ -215,6 +235,9 @@ public class PexelsSearchTools {
         int searchLimit = Math.min(n * 4, 20);
         progressContext.start(toolContext, "pexelsSearchAndImport",
                 "正在搜索并下载 Pexels 图片：" + query + "，目标 " + n + " 张");
+        String turnId = currentTurnId(toolContext);
+        Map<String, Object> input = Map.of("query", query, "count", n, "orientation", orientation != null ? orientation : "");
+        taskLedger.beforeCall(turnId, "pexelsSearchAndImport", input);
 
         try {
             PexelsSearchRequest request = new PexelsSearchRequest(
@@ -222,6 +245,7 @@ public class PexelsSearchTools {
             PexelsSearchResult result = pexelsPhotoService.search(request);
 
             if (result.photos().isEmpty()) {
+                taskLedger.recordSuccess(turnId, "pexelsSearchAndImport", input, Map.of("savedCount", 0), ToolExecutionRecord.NONE);
                 progressContext.done(toolContext, "pexelsSearchAndImport",
                         "Pexels 未找到与「" + query + "」相关的图片");
                 return "Pexels 未找到与「" + query + "」相关的图片可下载。";
@@ -253,6 +277,7 @@ public class PexelsSearchTools {
             }
 
             if (saved.isEmpty()) {
+                taskLedger.recordSuccess(turnId, "pexelsSearchAndImport", input, Map.of("savedCount", 0), ToolExecutionRecord.NONE);
                 progressContext.done(toolContext, "pexelsSearchAndImport",
                         "未能下载到有效图片：" + query);
                 return "搜索了「" + query + "」但未能下载到有效图片。请尝试其他搜索词。";
@@ -260,6 +285,8 @@ public class PexelsSearchTools {
 
             progressContext.done(toolContext, "pexelsSearchAndImport",
                     "已下载 " + saved.size() + " 张 Pexels 图片入库");
+            Map<String, Object> output = Map.of("savedCount", saved.size());
+            taskLedger.recordSuccess(turnId, "pexelsSearchAndImport", input, output, ToolExecutionRecord.GALLERY_CREATED);
             StringBuilder sb = new StringBuilder("已从 Pexels 搜索「").append(query)
                     .append("」并下载 ").append(saved.size()).append(" 张图片入库：\n");
             for (String s : saved) {
@@ -270,6 +297,7 @@ public class PexelsSearchTools {
         } catch (Exception e) {
             log.error("[PexelsTools] 搜索下载失败 query={}", query, e);
             progressContext.fail(toolContext, "pexelsSearchAndImport", e.getMessage());
+            taskLedger.recordFailure(turnId, "pexelsSearchAndImport", input, e.getMessage());
             return "Pexels 图片搜索下载失败：" + e.getMessage();
         }
     }
@@ -290,6 +318,9 @@ public class PexelsSearchTools {
 
         progressContext.start(toolContext, "pexelsGetPhoto",
                 "正在获取 Pexels 照片详情 ID:" + photoId);
+        String turnId = currentTurnId(toolContext);
+        Map<String, Object> input = Map.of("photoId", photoId);
+        taskLedger.beforeCall(turnId, "pexelsGetPhoto", input);
 
         try {
             PexelsPhoto photo = pexelsPhotoService.getPhoto(photoId);
@@ -319,11 +350,13 @@ public class PexelsSearchTools {
 
             progressContext.done(toolContext, "pexelsGetPhoto",
                     "Pexels 照片详情已获取 ID:" + photoId);
+            taskLedger.recordSuccess(turnId, "pexelsGetPhoto", input, Map.of(), ToolExecutionRecord.NONE);
             return sb.toString();
 
         } catch (Exception e) {
             log.error("[PexelsTools] 获取照片详情失败 photoId={}", photoId, e);
             progressContext.fail(toolContext, "pexelsGetPhoto", e.getMessage());
+            taskLedger.recordFailure(turnId, "pexelsGetPhoto", input, e.getMessage());
             return "Pexels 照片详情获取失败：" + e.getMessage();
         }
     }
@@ -371,5 +404,11 @@ public class PexelsSearchTools {
             cleaned = cleaned.substring(0, 80) + "...";
         }
         return cleaned.isBlank() ? "pexels-photo" : cleaned;
+    }
+
+    private static String currentTurnId(ToolContext toolContext) {
+        if (toolContext == null || toolContext.getContext() == null) return null;
+        Object value = toolContext.getContext().get("turnId");
+        return value instanceof String text ? text : null;
     }
 }

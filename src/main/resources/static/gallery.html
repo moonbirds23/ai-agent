@@ -1,0 +1,508 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>云图库 — 图片管理</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font:14px/1.5 'Microsoft YaHei',sans-serif;background:#f0f2f5;color:#333;min-height:100vh}
+a{color:#1890ff;text-decoration:none}
+
+/* ====== Header ====== */
+#header{background:#fff;border-bottom:1px solid #e8e8e8;padding:0 24px;display:flex;align-items:center;height:56px;gap:16px;box-shadow:0 1px 4px rgba(0,0,0,.04);position:sticky;top:0;z-index:50}
+#header .logo{font-size:18px;font-weight:700;color:#1a1a2e;display:flex;align-items:center;gap:8px}
+#header .logo .icon{font-size:22px}
+#header .nav{display:flex;gap:4px;margin-left:24px}
+#header .nav a{padding:6px 14px;border-radius:6px;font-size:13px;color:#555;transition:all .15s}
+#header .nav a:hover{background:#f0f5ff;color:#1890ff}
+#header .nav a.active{background:#e6f4ff;color:#1890ff;font-weight:600}
+#header .stats{margin-left:auto;font-size:12px;color:#999}
+
+/* ====== Toolbar ====== */
+#toolbar{max-width:1400px;margin:16px auto 0;padding:12px 24px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+#toolbar input[type=text]{flex:1;min-width:200px;padding:8px 12px;border:1px solid #d9d9d9;border-radius:8px;font-size:14px;outline:none;background:#fff}
+#toolbar input[type=text]:focus{border-color:#1890ff;box-shadow:0 0 0 2px rgba(24,144,255,.1)}
+#toolbar select{padding:8px 32px 8px 10px;border:1px solid #d9d9d9;border-radius:8px;font-size:13px;outline:none;background:#fff;cursor:pointer;-webkit-appearance:none;appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23999' d='M6 8L1 3h10z'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 10px center}
+#toolbar select:focus{border-color:#1890ff}
+#toolbar button{padding:8px 16px;border:1px solid #d9d9d9;background:#fff;border-radius:8px;font-size:13px;cursor:pointer;white-space:nowrap;transition:all .15s}
+#toolbar button:hover{border-color:#1890ff;color:#1890ff}
+#toolbar button.primary{background:#1890ff;color:#fff;border-color:#1890ff}
+#toolbar button.primary:hover{background:#40a9ff}
+#toolbar .fav-toggle{display:flex;align-items:center;gap:6px;font-size:13px;user-select:none;cursor:pointer;padding:8px 12px;border:1px solid #d9d9d9;border-radius:8px;background:#fff}
+#toolbar .fav-toggle:hover{border-color:#faad14}
+#toolbar .fav-toggle .star{font-size:16px;color:#ccc;transition:color .15s}
+#toolbar .fav-toggle .star.on{color:#faad14}
+
+/* ====== Grid ====== */
+#gallery-grid{max-width:1400px;margin:0 auto;padding:16px 24px;display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px}
+@media(max-width:700px){#gallery-grid{grid-template-columns:1fr}}
+
+/* ====== Card ====== */
+.gallery-card{background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.06);transition:box-shadow .2s,transform .15s;display:flex;flex-direction:column}
+.gallery-card:hover{box-shadow:0 4px 16px rgba(0,0,0,.1);transform:translateY(-2px)}
+.gallery-card .thumb-wrap{position:relative;width:100%;padding-top:75%;background:#f5f5f5;overflow:hidden;cursor:pointer}
+.gallery-card .thumb-wrap img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transition:opacity .3s}
+.gallery-card .thumb-wrap .fav-badge{position:absolute;top:8px;right:8px;width:28px;height:28px;background:rgba(255,255,255,.9);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:15px;z-index:2}
+.gallery-card .thumb-wrap .fav-badge.on{color:#faad14}
+.gallery-card .body{padding:12px 14px;flex:1;display:flex;flex-direction:column;gap:6px}
+.gallery-card .body .name{font-size:14px;font-weight:600;color:#1a1a2e;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.gallery-card .body .meta-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.gallery-card .body .tag{font-size:11px;padding:1px 8px;border-radius:10px;background:#f0f5ff;color:#1890ff;white-space:nowrap}
+.gallery-card .body .tag.category{background:#f6ffed;color:#52c41a}
+.gallery-card .body .tag.source{background:#fff7e6;color:#fa8c16}
+.gallery-card .body .tag.cache{background:#fff2f0;color:#ff4d4f}
+.gallery-card .body .dim{font-size:11px;color:#999}
+.gallery-card .body .color-dot{display:inline-block;width:12px;height:12px;border-radius:3px;border:1px solid rgba(0,0,0,.1);vertical-align:middle}
+.gallery-card .body .actions{display:flex;gap:8px;margin-top:auto;padding-top:8px;border-top:1px solid #f5f5f5}
+.gallery-card .body .actions button{flex:1;padding:5px 0;border:1px solid #e8e8e8;background:#fff;border-radius:6px;font-size:12px;cursor:pointer;transition:all .15s}
+.gallery-card .body .actions button:hover{border-color:#1890ff;color:#1890ff}
+.gallery-card .body .actions button.danger{color:#ff4d4f}
+.gallery-card .body .actions button.danger:hover{border-color:#ff4d4f;background:#fff2f0}
+
+/* ====== Pagination ====== */
+#pagination{max-width:1400px;margin:0 auto;padding:16px 24px 32px;display:flex;align-items:center;justify-content:center;gap:6px;flex-wrap:wrap}
+#pagination button,#pagination span{padding:6px 12px;border:1px solid #d9d9d9;background:#fff;border-radius:6px;font-size:13px;cursor:pointer;transition:all .15s;min-width:36px;text-align:center}
+#pagination button:hover:not(:disabled){border-color:#1890ff;color:#1890ff}
+#pagination button.active{background:#1890ff;color:#fff;border-color:#1890ff;font-weight:600}
+#pagination button:disabled{opacity:.4;cursor:not-allowed}
+#pagination .ellipsis{border:none;background:none;cursor:default}
+#pagination .page-size{margin-left:16px;font-size:12px;color:#888}
+
+/* ====== Lightbox ====== */
+#lightbox{display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:200;align-items:center;justify-content:center;flex-direction:column}
+#lightbox.show{display:flex}
+#lightbox img{max-width:90vw;max-height:75vh;object-fit:contain;border-radius:8px;box-shadow:0 8px 40px rgba(0,0,0,.3)}
+#lightbox .info{max-width:90vw;margin-top:16px;display:flex;gap:16px;flex-wrap:wrap;justify-content:center}
+#lightbox .info span{font-size:13px;color:#ccc;background:rgba(255,255,255,.1);padding:4px 12px;border-radius:4px}
+#lightbox .close{position:absolute;top:24px;right:24px;width:40px;height:40px;border-radius:50%;background:rgba(255,255,255,.15);border:none;color:#fff;font-size:22px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background .15s}
+#lightbox .close:hover{background:rgba(255,255,255,.25)}
+
+/* ====== Loading / Empty ====== */
+#loading{text-align:center;padding:60px 20px;color:#999;font-size:14px}
+#empty{display:none;text-align:center;padding:60px 20px;color:#bbb}
+#empty .icon{font-size:48px;margin-bottom:12px}
+
+/* ====== Edit Modal ====== */
+#edit-modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:250;align-items:center;justify-content:center}
+#edit-modal.show{display:flex}
+#edit-modal .box{background:#fff;border-radius:12px;padding:24px;min-width:380px;max-width:480px;box-shadow:0 8px 40px rgba(0,0,0,.15)}
+#edit-modal .box h3{font-size:16px;margin-bottom:16px;color:#1a1a2e}
+#edit-modal .box label{display:block;font-size:12px;color:#888;margin-bottom:4px;margin-top:12px}
+#edit-modal .box input,#edit-modal .box textarea{width:100%;padding:8px 12px;border:1px solid #d9d9d9;border-radius:8px;font-size:13px;outline:none;font-family:inherit}
+#edit-modal .box textarea{height:72px;resize:vertical}
+#edit-modal .box input:focus,#edit-modal .box textarea:focus{border-color:#1890ff;box-shadow:0 0 0 2px rgba(24,144,255,.1)}
+#edit-modal .box .btns{display:flex;gap:10px;justify-content:flex-end;margin-top:20px}
+#edit-modal .box .btns button{padding:8px 20px;border-radius:8px;font-size:13px;cursor:pointer;border:1px solid #d9d9d9;background:#fff;color:#555;transition:all .15s}
+#edit-modal .box .btns button.save{background:#1890ff;color:#fff;border-color:#1890ff}
+#edit-modal .box .btns button.save:hover{background:#40a9ff}
+#edit-modal .box .btns button:hover:not(.save){border-color:#1890ff;color:#1890ff}
+
+/* ====== Toast ====== */
+.toast{position:fixed;top:20px;right:20px;background:#333;color:#fff;padding:10px 20px;border-radius:8px;font-size:13px;z-index:300;opacity:0;transition:opacity .2s;pointer-events:none}
+.toast.show{opacity:1}
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<div id="header">
+  <div class="logo"><span class="icon">&#128247;</span>云图库</div>
+  <div class="nav">
+    <a href="index.html">AI 助手</a>
+    <a href="gallery.html" class="active">图片管理</a>
+  </div>
+  <div class="stats" id="total-stats">共 0 张图片</div>
+</div>
+
+<!-- Toolbar -->
+<div id="toolbar">
+  <input type="text" id="search-input" placeholder="搜索图片名称、简介、标签..." onkeydown="if(event.key==='Enter')search()">
+  <select id="category-select" onchange="search()">
+    <option value="">全部分类</option>
+  </select>
+  <select id="source-select" onchange="search()">
+    <option value="">全部来源</option>
+    <option value="local">本地上传</option>
+    <option value="web-download">网络下载</option>
+    <option value="web-search">网络搜索</option>
+    <option value="web-import">URL导入</option>
+    <option value="ai-generated">AI生图</option>
+    <option value="pexels">Pexels</option>
+  </select>
+  <div class="fav-toggle" id="fav-toggle" onclick="toggleFavOnly()">
+    <span class="star" id="fav-star">&#9733;</span>仅收藏
+  </div>
+  <button onclick="search()">搜索</button>
+</div>
+
+<!-- Grid -->
+<div id="gallery-grid"></div>
+<div id="loading">加载中...</div>
+<div id="empty"><div class="icon">&#128248;</div>暂无图片</div>
+
+<!-- Pagination -->
+<div id="pagination"></div>
+
+<!-- Lightbox -->
+<div id="lightbox" onclick="closeLightbox()">
+  <button class="close" onclick="closeLightbox()">&times;</button>
+  <img id="lightbox-img" src="" alt="">
+  <div class="info" id="lightbox-info"></div>
+</div>
+
+<!-- Edit Modal -->
+<div id="edit-modal" onclick="if(event.target===this)closeEditModal()">
+  <div class="box">
+    <h3>编辑图片信息</h3>
+    <input type="hidden" id="edit-id">
+    <label>名称</label>
+    <input type="text" id="edit-name" placeholder="图片名称">
+    <label>简介</label>
+    <textarea id="edit-intro" placeholder="图片简介/描述"></textarea>
+    <label>分类</label>
+    <input type="text" id="edit-category" placeholder="如: 风景, 人物, 抽象">
+    <label>标签（逗号分隔）</label>
+    <input type="text" id="edit-tags" placeholder="如: 唯美, 自然, 冬季">
+    <div class="btns">
+      <button onclick="closeEditModal()">取消</button>
+      <button class="save" onclick="saveEdit()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<script>
+/* ====== STATE ====== */
+let currentPage = 1;
+let pageSize = 20;
+let totalPages = 1;
+let totalRecords = 0;
+let favOnly = false;
+let allCategories = [];
+let categorySet = new Set();
+let currentPicture = null; // for lightbox
+
+/* ====== INIT ====== */
+window.onload = () => {
+  loadCategories();
+  search();
+};
+
+/* ====== TOAST ====== */
+function toast(msg, ms) {
+  const el = document.getElementById('toast');
+  el.textContent = msg; el.classList.add('show');
+  clearTimeout(el._tid);
+  el._tid = setTimeout(() => el.classList.remove('show'), ms || 2500);
+}
+
+/* ====== SEARCH ====== */
+function search(page) {
+  if (page) currentPage = page; else currentPage = 1;
+  const keyword = document.getElementById('search-input').value.trim();
+  const category = document.getElementById('category-select').value;
+  const sourceType = document.getElementById('source-select').value;
+
+  let url = `/api/gallery/page?page=${currentPage}&pageSize=${pageSize}`;
+  if (keyword) url += '&keyword=' + encodeURIComponent(keyword);
+  if (category) url += '&category=' + encodeURIComponent(category);
+  if (sourceType) url += '&sourceType=' + encodeURIComponent(sourceType);
+  if (favOnly) url += '&favoritedOnly=true';
+
+  document.getElementById('loading').style.display = 'block';
+  document.getElementById('empty').style.display = 'none';
+  document.getElementById('gallery-grid').innerHTML = '';
+
+  fetch(url)
+    .then(r => r.json())
+    .then(result => {
+      document.getElementById('loading').style.display = 'none';
+      if (result.code === 0 && result.data) {
+        const data = result.data;
+        totalRecords = data.total || 0;
+        totalPages = Math.ceil(totalRecords / pageSize) || 1;
+        document.getElementById('total-stats').textContent = `共 ${totalRecords} 张图片`;
+        if (!data.records || data.records.length === 0) {
+          document.getElementById('empty').style.display = 'block';
+        } else {
+          renderCards(data.records);
+          // Collect categories for filter dropdown (dedup)
+          data.records.forEach(p => {
+            if (p.category && !categorySet.has(p.category)) {
+              categorySet.add(p.category);
+              allCategories.push(p.category);
+            }
+          });
+          updateCategorySelect();
+        }
+        renderPagination();
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      } else {
+        document.getElementById('empty').style.display = 'block';
+      }
+    })
+    .catch(e => {
+      document.getElementById('loading').style.display = 'none';
+      toast('网络异常: ' + e.message);
+    });
+}
+
+/* ====== CATEGORIES ====== */
+function loadCategories() {
+  // Fetch first page to discover categories (with dedup)
+  fetch('/api/gallery/page?page=1&pageSize=100')
+    .then(r => r.json())
+    .then(result => {
+      if (result.code === 0 && result.data && result.data.records) {
+        result.data.records.forEach(p => {
+          if (p.category && !categorySet.has(p.category)) {
+            categorySet.add(p.category);
+            allCategories.push(p.category);
+          }
+        });
+        updateCategorySelect();
+      }
+    }).catch(() => {});
+}
+
+function updateCategorySelect() {
+  const sel = document.getElementById('category-select');
+  const currentVal = sel.value;
+  sel.innerHTML = '<option value="">全部分类</option>';
+  allCategories.sort().forEach(c => {
+    sel.innerHTML += `<option value="${escAttr(c)}">${escHtml(c)}</option>`;
+  });
+  sel.value = currentVal;
+}
+
+/* ====== RENDER CARDS ====== */
+function renderCards(pictures) {
+  const grid = document.getElementById('gallery-grid');
+  grid.innerHTML = pictures.map(p => {
+    const imgUrl = `/api/gallery/files/${p.id}`;
+    const favOn = p.favorited ? ' on' : '';
+    const tagsHtml = (p.tags || []).slice(0, 3).map(t => `<span class="tag">${escHtml(t)}</span>`).join('');
+    const catHtml = p.category ? `<span class="tag category">${escHtml(p.category)}</span>` : '';
+    const srcHtml = p.sourceType ? `<span class="tag source">${escHtml(p.sourceType)}</span>` : '';
+    const cacheHtml = p.storageLocation === 'CACHE' ? '<span class="tag cache">缓存</span>' : '';
+    const dimHtml = (p.picWidth && p.picHeight) ? `<span class="dim">${p.picWidth}×${p.picHeight}</span>` : '';
+    const fmtHtml = p.picFormat ? `<span class="dim">${p.picFormat.toUpperCase()}</span>` : '';
+    const colorHtml = p.picColor ? `<span class="color-dot" style="background:${escAttr(p.picColor)}" title="${escAttr(p.picColor)}"></span>` : '';
+    const sizeHtml = p.picSize ? `<span class="dim">${formatSize(p.picSize)}</span>` : '';
+
+    return `
+    <div class="gallery-card" data-id="${p.id}">
+      <div class="thumb-wrap" onclick="openLightbox(${p.id})">
+        <img src="${imgUrl}" alt="${escAttr(p.name || '')}" loading="lazy">
+        <div class="fav-badge${favOn}">&#9733;</div>
+      </div>
+      <div class="body">
+        <div class="name" title="${escAttr(p.name || '未命名')}">${escHtml(p.name || '未命名')}</div>
+        <div class="meta-row">
+          ${catHtml}${srcHtml}${tagsHtml}${colorHtml}
+        </div>
+        <div class="meta-row">${dimHtml}${fmtHtml}${sizeHtml}</div>
+        <div class="actions">
+          <button onclick="event.stopPropagation();editPic(${p.id})">✎ 编辑</button>
+          <button onclick="event.stopPropagation();toggleFav(${p.id})">${p.favorited ? '★ 已收藏' : '☆ 收藏'}</button>
+          <button class="danger" onclick="event.stopPropagation();deletePic(${p.id})">删除</button>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+/* ====== PAGINATION ====== */
+function renderPagination() {
+  const container = document.getElementById('pagination');
+  if (totalPages <= 1 && totalRecords <= pageSize) {
+    container.innerHTML = '';
+    return;
+  }
+
+  let html = '';
+  html += `<button ${currentPage <= 1 ? 'disabled' : ''} onclick="search(${currentPage - 1})">上一页</button>`;
+
+  const pages = buildPageRange(currentPage, totalPages);
+  pages.forEach(p => {
+    if (p === '...') {
+      html += '<span class="ellipsis">...</span>';
+    } else {
+      html += `<button class="${p === currentPage ? 'active' : ''}" onclick="search(${p})">${p}</button>`;
+    }
+  });
+
+  html += `<button ${currentPage >= totalPages ? 'disabled' : ''} onclick="search(${currentPage + 1})">下一页</button>`;
+  html += `<span class="page-size">
+    <select onchange="changePageSize(this.value)" style="padding:4px 8px;border:1px solid #d9d9d9;border-radius:4px;font-size:12px">
+      <option value="20" ${pageSize === 20 ? 'selected' : ''}>20条/页</option>
+      <option value="40" ${pageSize === 40 ? 'selected' : ''}>40条/页</option>
+      <option value="60" ${pageSize === 60 ? 'selected' : ''}>60条/页</option>
+    </select>
+  </span>`;
+
+  container.innerHTML = html;
+}
+
+function buildPageRange(current, total) {
+  if (total <= 7) {
+    return Array.from({length: total}, (_, i) => i + 1);
+  }
+  const pages = [1];
+  if (current > 3) pages.push('...');
+  for (let i = Math.max(2, current - 1); i <= Math.min(total - 1, current + 1); i++) {
+    pages.push(i);
+  }
+  if (current < total - 2) pages.push('...');
+  pages.push(total);
+  return pages;
+}
+
+function changePageSize(size) {
+  pageSize = parseInt(size);
+  search(1);
+}
+
+/* ====== FAV / DELETE ====== */
+function toggleFavOnly() {
+  favOnly = !favOnly;
+  document.getElementById('fav-star').className = favOnly ? 'star on' : 'star';
+  search(1);
+}
+
+async function toggleFav(id) {
+  try {
+    const resp = await fetch(`/api/gallery/${id}/favorite?favorited=${!currentFavState(id)}`, { method: 'POST' });
+    const result = await resp.json();
+    if (result.code === 0) {
+      toast(result.data && result.data.favorited ? '已收藏' : '已取消收藏');
+      search(currentPage); // refresh
+    } else {
+      toast('操作失败: ' + result.message);
+    }
+  } catch(e) { toast('网络异常'); }
+}
+
+function currentFavState(id) {
+  // approximate — just toggle based on what's rendered
+  const card = document.querySelector(`.gallery-card[data-id="${id}"]`);
+  if (!card) return false;
+  const btn = card.querySelector('.actions button');
+  return btn && btn.textContent.includes('已收藏');
+}
+
+async function deletePic(id) {
+  if (!confirm('确定删除该图片？此操作不可撤销。')) return;
+  try {
+    const resp = await fetch(`/api/gallery/${id}`, { method: 'DELETE' });
+    const result = await resp.json();
+    if (result.code === 0) {
+      toast('已删除');
+      search(currentPage);
+    } else {
+      toast('删除失败: ' + result.message);
+    }
+  } catch(e) { toast('网络异常'); }
+}
+
+/* ====== EDIT METADATA ====== */
+function editPic(id) {
+  fetch(`/api/gallery/${id}`)
+    .then(r => r.json())
+    .then(result => {
+      if (result.code === 0 && result.data) {
+        const p = result.data;
+        document.getElementById('edit-id').value = p.id;
+        document.getElementById('edit-name').value = p.name || '';
+        document.getElementById('edit-intro').value = p.introduction || '';
+        document.getElementById('edit-category').value = p.category || '';
+        document.getElementById('edit-tags').value = (p.tags || []).join(', ');
+        document.getElementById('edit-modal').classList.add('show');
+      }
+    }).catch(e => toast('加载图片信息失败'));
+}
+
+function closeEditModal() {
+  document.getElementById('edit-modal').classList.remove('show');
+}
+
+async function saveEdit() {
+  const id = document.getElementById('edit-id').value;
+  const name = document.getElementById('edit-name').value.trim();
+  const intro = document.getElementById('edit-intro').value.trim();
+  const category = document.getElementById('edit-category').value.trim();
+  const tagsStr = document.getElementById('edit-tags').value.trim();
+  const tags = tagsStr ? tagsStr.split(',').map(s => s.trim()).filter(Boolean) : [];
+
+  try {
+    const resp = await fetch(`/api/gallery/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: name || null, introduction: intro || null, category: category || null, tags: tags.length > 0 ? tags : null })
+    });
+    const result = await resp.json();
+    if (result.code === 0) {
+      toast('已更新');
+      closeEditModal();
+      search(currentPage);
+      // Refresh category dropdown
+      allCategories = [];
+      loadCategories();
+    } else {
+      toast('更新失败: ' + result.message);
+    }
+  } catch (e) { toast('网络异常'); }
+}
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeEditModal(); });
+
+/* ====== LIGHTBOX ====== */
+function openLightbox(id) {
+  fetch(`/api/gallery/${id}`)
+    .then(r => r.json())
+    .then(result => {
+      if (result.code === 0 && result.data) {
+        currentPicture = result.data;
+        const p = currentPicture;
+        document.getElementById('lightbox-img').src = `/api/gallery/files/${id}`;
+        const info = [];
+        if (p.name) info.push(`<span>名称：${escHtml(p.name)}</span>`);
+        if (p.introduction) info.push(`<span>简介：${escHtml(p.introduction)}</span>`);
+        if (p.category) info.push(`<span>分类：${escHtml(p.category)}</span>`);
+        if (p.tags && p.tags.length) info.push(`<span>标签：${escHtml(p.tags.join('、'))}</span>`);
+        if (p.picWidth && p.picHeight) info.push(`<span>尺寸：${p.picWidth}×${p.picHeight}</span>`);
+        if (p.picFormat) info.push(`<span>格式：${p.picFormat.toUpperCase()}</span>`);
+        if (p.picColor) info.push(`<span>主色：<span class="color-dot" style="background:${escAttr(p.picColor)}"></span> ${p.picColor}</span>`);
+        if (p.sourceType) info.push(`<span>来源：${escHtml(p.sourceType)}</span>`);
+        if (p.picSize) info.push(`<span>大小：${formatSize(p.picSize)}</span>`);
+        document.getElementById('lightbox-info').innerHTML = info.join('');
+        document.getElementById('lightbox').classList.add('show');
+      }
+    }).catch(() => {});
+}
+
+function closeLightbox() {
+  document.getElementById('lightbox').classList.remove('show');
+}
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeLightbox(); });
+
+/* ====== HELPERS ====== */
+function escHtml(s) {
+  if (!s) return '';
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function escAttr(s) {
+  if (!s) return '';
+  return s.replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+function formatSize(bytes) {
+  if (!bytes || bytes === 0) return '';
+  if (bytes < 1024) return bytes + 'B';
+  if (bytes < 1048576) return (bytes / 1024).toFixed(1) + 'KB';
+  return (bytes / 1048576).toFixed(1) + 'MB';
+}
+</script>
+</body>
+</html>

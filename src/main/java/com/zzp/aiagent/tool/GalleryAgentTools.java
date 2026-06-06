@@ -1,9 +1,9 @@
 package com.zzp.aiagent.tool;
 
+import com.zzp.aiagent.agent.task.TaskLedger;
+import com.zzp.aiagent.agent.task.ToolExecutionRecord;
 import com.zzp.aiagent.domain.gallery.GalleryImportUrlRequest;
 import com.zzp.aiagent.domain.gallery.GalleryUploadRequest;
-import com.zzp.aiagent.domain.rag.RagCandidate;
-import com.zzp.aiagent.domain.rag.RagSearchCriteria;
 import com.zzp.aiagent.domain.template.StyleTemplate;
 import com.zzp.aiagent.model.dto.image.ImageGenerationResult;
 import com.zzp.aiagent.model.dto.image.VisionAnalysisResult;
@@ -12,7 +12,6 @@ import com.zzp.aiagent.model.entity.PictureAiProfile;
 import com.zzp.aiagent.model.enums.StorageLocation;
 import com.zzp.aiagent.model.vo.ImageGeneratedEventVO;
 import com.zzp.aiagent.service.GalleryService;
-import com.zzp.aiagent.service.HybridGalleryRetriever;
 import com.zzp.aiagent.service.ImageGenerationService;
 import com.zzp.aiagent.service.PictureAiProfileService;
 import com.zzp.aiagent.service.StyleTemplateService;
@@ -24,7 +23,9 @@ import org.springframework.context.annotation.Profile;
 import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.stereotype.Component;
 
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
@@ -44,26 +45,26 @@ public class GalleryAgentTools {
     private final VisionAnalysisService visionAnalysisService;
     private final StyleTemplateService styleTemplateService;
     private final PictureAiProfileService profileService;
-    private final HybridGalleryRetriever hybridRetriever;
     private final CurrentImageContext currentImageContext;
     private final ToolProgressContext progressContext;
+    private final TaskLedger taskLedger;
 
     public GalleryAgentTools(GalleryService galleryService,
                              ImageGenerationService imageGenerationService,
                              VisionAnalysisService visionAnalysisService,
                              StyleTemplateService styleTemplateService,
                              PictureAiProfileService profileService,
-                             HybridGalleryRetriever hybridRetriever,
                              CurrentImageContext currentImageContext,
-                             ToolProgressContext progressContext) {
+                             ToolProgressContext progressContext,
+                             TaskLedger taskLedger) {
         this.galleryService = galleryService;
         this.imageGenerationService = imageGenerationService;
         this.visionAnalysisService = visionAnalysisService;
         this.styleTemplateService = styleTemplateService;
         this.profileService = profileService;
-        this.hybridRetriever = hybridRetriever;
         this.currentImageContext = currentImageContext;
         this.progressContext = progressContext;
+        this.taskLedger = taskLedger;
     }
 
     // ── 图库搜索 ────────────────────────────────────────────────────
@@ -87,33 +88,33 @@ public class GalleryAgentTools {
         int n = (limit != null && limit > 0 && limit <= 10) ? limit : 5;
         String q = (query != null && !query.isBlank()) ? query.strip() : "";
         progressContext.start(toolContext, "searchGallery", "正在搜索图库：" + (q.isBlank() ? "全部参考图" : q));
+        String turnId = currentTurnId(toolContext);
+        Map<String, Object> input = Map.of("query", q, "limit", n);
+        taskLedger.beforeCall(turnId, "searchGallery", input);
 
         List<GalleryPicture> results;
         if (!q.isEmpty()) {
-            // Try hybrid vector+keyword search first
-            RagSearchCriteria criteria = new RagSearchCriteria(
-                    q, null, null, null, null, null, false, null,
-                    n * 2, n, 0.3);
-            results = hybridRetriever.retrieve(criteria).stream()
-                    .map(RagCandidate::picture)
-                    .distinct()
-                    .limit(n)
-                    .toList();
-            if (results.isEmpty()) {
-                results = galleryService.searchByKeyword(q, n);
-            }
+            // Unified search via hybrid retriever (vector + keyword + metadata)
+            results = galleryService.search(q, n);
         } else {
             results = List.of();
         }
 
         if (results.isEmpty()) {
             progressContext.done(toolContext, "searchGallery", "图库中没有找到相关图片");
+            Map<String, Object> output = Map.of("resultCount", results.size());
+            taskLedger.recordSuccess(turnId, "searchGallery", input, output, ToolExecutionRecord.NONE);
             return "图库中没有找到与「" + q + "」相关的图片。";
         }
 
         progressContext.done(toolContext, "searchGallery", "图库搜索完成，找到 " + results.size() + " 张相关图片");
-        StringBuilder sb = new StringBuilder("找到 ").append(results.size()).append(" 张相关图片：\n");
-        for (int i = 0; i < results.size(); i++) {
+        Map<String, Object> output = Map.of("resultCount", results.size());
+        taskLedger.recordSuccess(turnId, "searchGallery", input, output, ToolExecutionRecord.NONE);
+
+        // 只展示前 3 张详情 + 总数 + 其余编号，避免对话区过长
+        int showCount = Math.min(results.size(), 3);
+        StringBuilder sb = new StringBuilder("找到 ").append(results.size()).append(" 张相关图片，前 ").append(showCount).append(" 张：\n");
+        for (int i = 0; i < showCount; i++) {
             GalleryPicture p = results.get(i);
             sb.append(i + 1).append(". [ID:").append(p.id()).append("] ");
             sb.append(p.name());
@@ -121,6 +122,13 @@ public class GalleryAgentTools {
                 sb.append(" — ").append(p.introduction());
             }
             sb.append("\n");
+        }
+        if (results.size() > showCount) {
+            sb.append("其余 ").append(results.size() - showCount).append(" 张编号：");
+            List<String> restIds = results.subList(showCount, results.size()).stream()
+                    .map(p -> "[ID:" + p.id() + "] " + p.name())
+                    .toList();
+            sb.append(String.join("、", restIds));
         }
         return sb.toString();
     }
@@ -196,6 +204,9 @@ public class GalleryAgentTools {
             ToolContext toolContext) {
 
         progressContext.start(toolContext, "analyzeImage", "正在分析当前图片");
+        String turnId = currentTurnId(toolContext);
+        Map<String, Object> input = Map.of("instruction", instruction != null ? instruction : "");
+        taskLedger.beforeCall(turnId, "analyzeImage", input);
         String imageBase64 = currentImageContext.getImageBase64(toolContext);
         if (imageBase64 == null || imageBase64.isBlank()) {
             progressContext.done(toolContext, "analyzeImage", "当前对话中没有可分析的图片");
@@ -220,11 +231,18 @@ public class GalleryAgentTools {
             if (result.imagePrompt() != null && !result.imagePrompt().isBlank()) {
                 sb.append("生图 Prompt：").append(result.imagePrompt()).append("\n");
             }
+            Map<String, Object> output = new LinkedHashMap<>();
+            output.put("subject", result.subject() != null ? result.subject() : "");
+            output.put("style", result.style() != null ? result.style() : "");
+            output.put("colors", result.colors() != null ? result.colors() : "");
+            output.put("composition", result.composition() != null ? result.composition() : "");
+            taskLedger.recordSuccess(turnId, "analyzeImage", input, output, ToolExecutionRecord.NONE);
             progressContext.done(toolContext, "analyzeImage", "图片分析完成");
             return sb.toString();
 
         } catch (Exception e) {
             log.error("[GalleryAgentTools] 图片分析失败", e);
+            taskLedger.recordFailure(turnId, "analyzeImage", input, e.getMessage());
             progressContext.fail(toolContext, "analyzeImage", e.getMessage());
             return "图片分析失败：" + e.getMessage();
         }
@@ -257,13 +275,21 @@ public class GalleryAgentTools {
             ToolContext toolContext) {
 
         progressContext.start(toolContext, "generateImage", "正在生成图片" + formatGenerationMeta(style, dimensions));
+        String turnId = currentTurnId(toolContext);
+        Map<String, Object> input = Map.of("prompt", prompt, "style", style != null ? style : "", "dimensions", dimensions != null ? dimensions : "");
+        taskLedger.beforeCall(turnId, "generateImage", input);
         try {
             ImageGenerationResult result = imageGenerationService.generate(prompt, style, dimensions);
 
             boolean autoSave = readSaveGeneratedToGallery(toolContext);
+            boolean savedToGallery = false;
             if (autoSave) {
-                saveToGallery(prompt, style, result);
-                log.info("[AgentTools] 图片生成成功，已自动入库");
+                savedToGallery = saveToGallery(prompt, style, result);
+                if (savedToGallery) {
+                    log.info("[AgentTools] 图片生成成功，已自动入库");
+                } else {
+                    log.warn("[AgentTools] 图片生成成功，但自动入库失败");
+                }
             } else {
                 log.info("[AgentTools] 图片生成成功 (未入库，等待用户确认)");
             }
@@ -278,11 +304,21 @@ public class GalleryAgentTools {
                     result.metadata()
             ));
             progressContext.done(toolContext, "generateImage", "图片生成完成");
-            return autoSave
-                    ? "图片已生成并自动保存到图库。可以在左侧图库面板查看。"
-                    : "图片已生成，并已在界面中展示。图片尚未自动入库；如用户需要保存，可提示点击保存到图库按钮。";
+            Map<String, Object> output = new LinkedHashMap<>();
+            output.put("imageUrl", result.imageUrl() != null ? result.imageUrl() : "");
+            output.put("imageBase64", result.imageBase64() != null ? result.imageBase64() : "");
+            output.put("revisedPrompt", result.revisedPrompt() != null ? result.revisedPrompt() : "");
+            taskLedger.recordSuccess(turnId, "generateImage", input, output, ToolExecutionRecord.IMAGE_GENERATED);
+            if (autoSave && savedToGallery) {
+                return "图片已生成并自动保存到图库。可以在左侧图库面板查看。";
+            } else if (autoSave) {
+                return "图片已生成，但自动保存到图库失败。可以在界面中点击保存按钮手动保存。";
+            } else {
+                return "图片已生成，并已在界面中展示。图片尚未自动入库；如用户需要保存，可提示点击保存到图库按钮。";
+            }
         } catch (Exception e) {
             log.error("[GalleryAgentTools] 图片生成失败", e);
+            taskLedger.recordFailure(turnId, "generateImage", input, e.getMessage());
             progressContext.fail(toolContext, "generateImage", e.getMessage());
             return "图片生成失败：" + e.getMessage();
         }
@@ -329,11 +365,99 @@ public class GalleryAgentTools {
             ToolContext toolContext) {
 
         progressContext.start(toolContext, "manageFavorite", "正在更新图片收藏状态 ID:" + pictureId);
+        String turnId = currentTurnId(toolContext);
+        Map<String, Object> input = Map.of("pictureId", pictureId, "favorited", favorited);
+        taskLedger.beforeCall(turnId, "manageFavorite", input);
         GalleryPicture result = galleryService.favorite(pictureId, favorited);
+        Map<String, Object> output = Map.of("pictureId", result.id(), "favorited", result.favorited());
+        taskLedger.recordSuccess(turnId, "manageFavorite", input, output, ToolExecutionRecord.GALLERY_FAVORITED);
         progressContext.done(toolContext, "manageFavorite", favorited ? "已加入收藏" : "已取消收藏");
         return favorited
                 ? "已将图片「" + result.name() + "」加入收藏。"
                 : "已取消收藏图片「" + result.name() + "」。";
+    }
+
+    // ── 图库管理 ────────────────────────────────────────────────────
+
+    @Tool(name = "updatePictureMetadata",
+          description = """
+                  Update the metadata (name, introduction, category, tags) of a picture \
+                  in the gallery. Only the fields you provide non-null values for will be \
+                  updated. Use this when the user asks to rename, re-tag, re-categorize, \
+                  or update the description of an existing picture.""")
+    public String updatePictureMetadata(
+            @ToolParam(required = true,
+                       description = "Picture ID to update")
+            Long pictureId,
+            @ToolParam(required = false,
+                       description = "New name for the picture")
+            String name,
+            @ToolParam(required = false,
+                       description = "New introduction / description")
+            String introduction,
+            @ToolParam(required = false,
+                       description = "New category (e.g. 'landscape', 'portrait', 'abstract')")
+            String category,
+            @ToolParam(required = false,
+                       description = "New tags list, e.g. ['sunset', 'winter', 'minimal']")
+            List<String> tags,
+            ToolContext toolContext) {
+
+        progressContext.start(toolContext, "updatePictureMetadata", "正在更新图片元数据 ID:" + pictureId);
+        String turnId = currentTurnId(toolContext);
+        Map<String, Object> input = Map.of("pictureId", pictureId, "name", name != null ? name : "",
+                "introduction", introduction != null ? introduction : "",
+                "category", category != null ? category : "",
+                "tags", tags != null ? tags : List.of());
+        taskLedger.beforeCall(turnId, "updatePictureMetadata", input);
+
+        try {
+            GalleryPicture updated = galleryService.update(pictureId, name, introduction, category, tags);
+            Map<String, Object> output = Map.of("pictureId", updated.id(), "name", updated.name());
+            taskLedger.recordSuccess(turnId, "updatePictureMetadata", input, output,
+                    ToolExecutionRecord.GALLERY_UPDATED);
+            progressContext.done(toolContext, "updatePictureMetadata",
+                    "图片元数据已更新 ID:" + pictureId);
+            return "已更新图片「" + updated.name() + "」的元数据（ID:" + pictureId + "）。";
+        } catch (Exception e) {
+            log.error("[GalleryAgentTools] 更新图片元数据失败", e);
+            taskLedger.recordFailure(turnId, "updatePictureMetadata", input, e.getMessage());
+            progressContext.fail(toolContext, "updatePictureMetadata", e.getMessage());
+            return "更新图片元数据失败：" + e.getMessage();
+        }
+    }
+
+    @Tool(name = "deletePicture",
+          description = """
+                  Delete a picture from the gallery by its ID. This permanently removes \
+                  the picture and its AI profile data. Use this when the user explicitly \
+                  asks to delete or remove a specific picture. WARNING: this cannot be undone.""")
+    public String deletePicture(
+            @ToolParam(required = true,
+                       description = "Picture ID to delete")
+            Long pictureId,
+            ToolContext toolContext) {
+
+        progressContext.start(toolContext, "deletePicture", "正在删除图片 ID:" + pictureId);
+        String turnId = currentTurnId(toolContext);
+        Map<String, Object> input = Map.of("pictureId", pictureId);
+        taskLedger.beforeCall(turnId, "deletePicture", input);
+
+        try {
+            GalleryPicture picture = galleryService.getById(pictureId);
+            String pictureName = picture.name();
+            galleryService.delete(pictureId);
+            Map<String, Object> output = Map.of("pictureId", pictureId, "name", pictureName);
+            taskLedger.recordSuccess(turnId, "deletePicture", input, output,
+                    ToolExecutionRecord.GALLERY_DELETED);
+            progressContext.done(toolContext, "deletePicture", "图片已删除 ID:" + pictureId);
+            return "已删除图片「" + pictureName + "」（ID:" + pictureId + "）。此操作不可撤销。";
+        } catch (Exception e) {
+            log.error("[GalleryAgentTools] 删除图片失败", e);
+            taskLedger.recordFailure(turnId, "deletePicture", input, e.getMessage());
+            progressContext.fail(toolContext, "deletePicture", e.getMessage());
+            return "删除图片失败：" + e.getMessage();
+        }
     }
 
     // ── Helpers ─────────────────────────────────────────────────────
@@ -346,7 +470,7 @@ public class GalleryAgentTools {
         return flag instanceof Boolean b && b;
     }
 
-    private void saveToGallery(String prompt, String style, ImageGenerationResult result) {
+    private boolean saveToGallery(String prompt, String style, ImageGenerationResult result) {
         try {
             String name = prompt.length() > 80 ? prompt.substring(0, 80) + "..." : prompt;
             List<String> tags = style != null && !style.isBlank()
@@ -364,8 +488,10 @@ public class GalleryAgentTools {
                 GalleryPicture saved = galleryService.importUrl(req);
                 log.info("[AgentTools] 生成图片已通过URL导入 pictureId={}", saved.id());
             }
+            return true;
         } catch (Exception e) {
             log.warn("[AgentTools] 保存生成图片失败", e);
+            return false;
         }
     }
 
@@ -384,5 +510,11 @@ public class GalleryAgentTools {
         if (value != null && !value.isBlank()) {
             sb.append("  ").append(label).append("：").append(value).append("\n");
         }
+    }
+
+    private static String currentTurnId(ToolContext toolContext) {
+        if (toolContext == null || toolContext.getContext() == null) return null;
+        Object value = toolContext.getContext().get(CurrentImageContext.TURN_ID_CONTEXT_KEY);
+        return value instanceof String text ? text : null;
     }
 }

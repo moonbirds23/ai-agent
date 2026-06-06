@@ -1,5 +1,6 @@
 package com.zzp.aiagent.tool;
 
+import com.zzp.aiagent.agent.task.TaskLedger;
 import com.zzp.aiagent.domain.pexels.PexelsPhoto;
 import com.zzp.aiagent.domain.pexels.PexelsPhotoService;
 import com.zzp.aiagent.domain.pexels.PexelsPhotoSrc;
@@ -48,6 +49,9 @@ class PexelsSearchToolsTest {
     @Mock
     private ToolProgressContext progressContext;
 
+    @Mock
+    private TaskLedger taskLedger;
+
     private PexelsSearchTools tools;
 
     private static PexelsPhoto samplePhoto(long id, String alt, String color) {
@@ -74,7 +78,7 @@ class PexelsSearchToolsTest {
 
     @BeforeEach
     void setUp() {
-        tools = new PexelsSearchTools(pexelsPhotoService, galleryService, progressContext);
+        tools = new PexelsSearchTools(pexelsPhotoService, galleryService, progressContext, taskLedger);
     }
 
     // ── pexelsSearchPhotos ─────────────────────────────────────────

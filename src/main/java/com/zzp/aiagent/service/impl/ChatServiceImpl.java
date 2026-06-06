@@ -1,8 +1,9 @@
 package com.zzp.aiagent.service.impl;
 
-import com.zzp.aiagent.advisor.ContentGuardAdvisor;
-import com.zzp.aiagent.advisor.ExceptionGuardAdvisor;
-import com.zzp.aiagent.advisor.LoggingAdvisor;
+import com.zzp.aiagent.agent.Agent;
+import com.zzp.aiagent.agent.AgentConfig;
+import com.zzp.aiagent.agent.task.ResponseComposer;
+import com.zzp.aiagent.agent.task.TaskLedger;
 import com.zzp.aiagent.common.ThrowUtils;
 import com.zzp.aiagent.domain.gallery.GalleryImportUrlRequest;
 import com.zzp.aiagent.domain.gallery.GalleryUploadRequest;
@@ -28,9 +29,7 @@ import com.zzp.aiagent.tool.ToolProgressContext;
 import com.zzp.aiagent.tool.WebSearchTools;
 import com.zzp.aiagent.utils.PromptTemplate;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.ChatClientResponse;
-import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.model.ChatModel;
@@ -49,11 +48,16 @@ import java.util.Set;
 import java.util.UUID;
 
 /**
- * Chat service using Spring AI Tool Calling for autonomous mode orchestration.
+ * Chat service — orchestration role.
  * <p>
- * The model decides which tools ({@code searchGallery}, {@code analyzeImage},
- * {@code generateImage}, etc.) to call based on user intent — no more
- * explicit mode switching. Advisor chain: ContentGuard → MCMA → Logging → ExceptionGuard.
+ * Responsibilities:
+ * <ul>
+ *   <li>Pre-processing: image auto-save, media construction, reference context.</li>
+ *   <li>Delegate execution to {@link Agent} (which owns the {@code ChatClient}).</li>
+ *   <li>Post-processing: hallucination guard, VO construction.</li>
+ * </ul>
+ * Advisor chain (managed by Agent):
+ * ContentGuard(0) → AgentTrace(5) → MCMA(built-in) → Logging(30) → ExceptionGuard(MAX)
  */
 @Service
 @Profile("!test")
@@ -63,14 +67,14 @@ public class ChatServiceImpl implements ChatService {
     private static final long MAX_IMAGE_BYTES = 10 * 1024 * 1024;
     private static final Set<String> ALLOWED_IMAGE_TYPES = Set.of("png", "jpeg", "jpg", "webp", "gif");
 
-    private final ChatClient chatClient;
-    private final ChatMemory chatMemory;
+    private final Agent agent;
     private final GalleryService galleryService;
     private final PictureAiProfileService pictureAiProfileService;
     private final ChatMediaService chatMediaService;
     private final ConversationLimitService conversationLimitService;
     private final CurrentImageContext currentImageContext;
     private final ToolProgressContext toolProgressContext;
+    private final TaskLedger taskLedger;
 
     public ChatServiceImpl(ChatModel openAiChatModel, ChatMemory chatMemory, PromptTemplate promptTemplate,
                            GalleryAgentTools galleryAgentTools,
@@ -81,27 +85,24 @@ public class ChatServiceImpl implements ChatService {
                            ChatMediaService chatMediaService,
                            ConversationLimitService conversationLimitService,
                            CurrentImageContext currentImageContext,
-                           ToolProgressContext toolProgressContext) {
-        this.chatMemory = chatMemory;
+                           ToolProgressContext toolProgressContext,
+                           TaskLedger taskLedger) {
         this.galleryService = galleryService;
         this.pictureAiProfileService = pictureAiProfileService;
         this.chatMediaService = chatMediaService;
         this.conversationLimitService = conversationLimitService;
         this.currentImageContext = currentImageContext;
         this.toolProgressContext = toolProgressContext;
+        this.taskLedger = taskLedger;
 
-        String systemPrompt = promptTemplate.render("default", "system");
-
-        this.chatClient = ChatClient.builder(openAiChatModel)
-                .defaultSystem(systemPrompt)
-                .defaultTools(galleryAgentTools, webSearchTools, pexelsSearchTools)
-                .defaultAdvisors(
-                        new ContentGuardAdvisor(),
-                        MessageChatMemoryAdvisor.builder(chatMemory).build(),
-                        new LoggingAdvisor(),
-                        new ExceptionGuardAdvisor()
-                )
-                .build();
+        this.agent = new Agent("cloud-gallery-agent",
+                AgentConfig.of("cloud-gallery-agent"),
+                openAiChatModel,
+                chatMemory,
+                promptTemplate,
+                galleryAgentTools,
+                webSearchTools,
+                pexelsSearchTools);
     }
 
     // ── 非流式入口 ──────────────────────────────────────────────────
@@ -114,14 +115,11 @@ public class ChatServiceImpl implements ChatService {
         currentImageContext.bind(turnId, extractImageBase64(request));
 
         try {
-            String response = chatClient.prompt()
-                    .user(spec -> buildUserSpec(spec, request, saved))
-                    .toolContext(toolContext(chatId, turnId, request))
-                    .advisors(spec -> spec
-                            .param(ChatMemory.CONVERSATION_ID, chatId)
-                            .param("chatId", chatId))
-                    .call()
-                    .content();
+            String userText = buildUserText(request);
+            Media media = chatMediaService.createMedia(saved, request.imageBase64(), request.imageUrl());
+            Map<String, Object> ctx = toolContext(chatId, turnId, request);
+
+            String response = agent.run(userText, media, ctx, chatId).content();
 
             ToolProgressContext.ToolTraceSnapshot trace = toolProgressContext.snapshot(turnId);
             if (trace.imageGenerated()) {
@@ -134,9 +132,11 @@ public class ChatServiceImpl implements ChatService {
                 }
             }
 
-            return ChatResponseVO.textOnly(chatId, guardHallucinatedImageResult(request, turnId, response));
+            String safeResponse = ResponseComposer.composeVerified(response, taskLedger, turnId);
+            return ChatResponseVO.textOnly(chatId, safeResponse);
         } finally {
             toolProgressContext.clear(turnId);
+            taskLedger.clear(turnId);
             currentImageContext.clear(turnId);
         }
     }
@@ -150,18 +150,15 @@ public class ChatServiceImpl implements ChatService {
         String turnId = newTurnId(chatId);
         currentImageContext.bind(turnId, extractImageBase64(request));
 
+        String userText = buildUserText(request);
+        Media media = chatMediaService.createMedia(saved, request.imageBase64(), request.imageUrl());
+        Map<String, Object> ctx = toolContext(chatId, turnId, request);
+
         StringBuilder accumulator = new StringBuilder();
         Sinks.Many<StreamEventVO> progressSink = Sinks.many().multicast().onBackpressureBuffer();
         toolProgressContext.bind(turnId, chatId, progressSink);
 
-        Flux<StreamEventVO> eventFlux = chatClient.prompt()
-                .user(spec -> buildUserSpec(spec, request, saved))
-                .toolContext(toolContext(chatId, turnId, request))
-                .advisors(spec -> spec
-                        .param(ChatMemory.CONVERSATION_ID, chatId)
-                        .param("chatId", chatId))
-                .stream()
-                .chatClientResponse()
+        Flux<StreamEventVO> eventFlux = agent.streamRaw(userText, media, ctx, chatId)
                 .concatMap(clientResponse -> {
                     Flux<StreamEventVO> events = Flux.empty();
                     ChatResponse cr = clientResponse.chatResponse();
@@ -192,8 +189,8 @@ public class ChatServiceImpl implements ChatService {
 
         Flux<StreamEventVO> doneEvent = Flux.defer(() -> {
             String fullText = accumulator.toString();
-            String guardedText = guardHallucinatedImageResult(request, turnId, fullText);
-            return Flux.just(StreamEventVO.done(chatId, ChatResponseVO.textOnly(chatId, guardedText)));
+            String safeText = ResponseComposer.composeVerified(fullText, taskLedger, turnId);
+            return Flux.just(StreamEventVO.done(chatId, ChatResponseVO.textOnly(chatId, safeText)));
         });
 
         Flux<StreamEventVO> mergedEvents = Flux.merge(
@@ -217,6 +214,7 @@ public class ChatServiceImpl implements ChatService {
             return Flux.just(StreamEventVO.error(errorMsg));
         }).doFinally(signal -> {
             toolProgressContext.clear(turnId);
+            taskLedger.clear(turnId);
             currentImageContext.clear(turnId);
         });
     }
@@ -235,75 +233,18 @@ public class ChatServiceImpl implements ChatService {
         return chatId + ":" + UUID.randomUUID();
     }
 
-    private String guardHallucinatedImageResult(ChatRequest request, String turnId, String response) {
-        if (response == null || response.isBlank()) {
-            return response;
-        }
-        String userMessage = request.message() != null ? request.message() : "";
-        ToolProgressContext.ToolTraceSnapshot trace = toolProgressContext.snapshot(turnId);
-
-        if (isImageGenerationIntent(userMessage) && !trace.imageGenerated() && claimsImageGenerated(response)) {
-            log.warn("[ImageGuard] 拦截未调用 generateImage 的生图幻觉 turnId={} message={} response={}",
-                    turnId, userMessage, response);
-            return "本轮没有成功调用图片生成工具，因此不能确认图片已生成。请重新发送生成请求，我会调用 generateImage 工具完成生成。";
-        }
-
-        if (isImageSearchIntent(userMessage) && !trace.imageCandidates() && claimsImageSearchResult(response)) {
-            log.warn("[ImageGuard] 拦截未返回 image_candidates 的搜图幻觉 turnId={} message={} response={}",
-                    turnId, userMessage, response);
-            return "本轮没有获得真实可展示的网络图片候选，因此不能返回图片结果。请换一个更具体的搜索词重试。";
-        }
-
-        return response;
-    }
-
-    private static boolean isImageGenerationIntent(String message) {
-        String text = normalizeIntentText(message);
-        boolean generateVerb = text.contains("生成") || text.contains("生图") || text.contains("绘制")
-                || text.contains("画一") || text.contains("画张") || text.contains("出图") || text.contains("做一张");
-        boolean imageNoun = text.contains("图片") || text.contains("照片") || text.contains("图像") || text.contains("图");
-        return generateVerb && imageNoun;
-    }
-
-    private static boolean isImageSearchIntent(String message) {
-        String text = normalizeIntentText(message);
-        boolean searchVerb = text.contains("搜索") || text.contains("搜图") || text.contains("找图")
-                || text.contains("找几张") || text.contains("找一张") || text.contains("浏览");
-        boolean imageNoun = text.contains("图片") || text.contains("照片") || text.contains("素材") || text.contains("图");
-        return searchVerb && imageNoun;
-    }
-
-    private static boolean claimsImageGenerated(String response) {
-        String text = normalizeIntentText(response);
-        return text.contains("图片已生成") || text.contains("已生成图片") || text.contains("生成了图片")
-                || text.contains("生成了一张") || text.contains("开始生成图片") || text.contains("[图片链接]")
-                || text.contains("图片链接") || text.contains("点击以下链接查看");
-    }
-
-    private static boolean claimsImageSearchResult(String response) {
-        String text = normalizeIntentText(response);
-        return text.contains("[图片链接]") || text.contains("图片链接") || text.contains("图片链接1")
-                || text.contains("图片1") || text.contains("图片2") || text.contains("找到了") && text.contains("图片")
-                || text.contains("搜索结果") && text.contains("图片");
-    }
-
-    private static String normalizeIntentText(String text) {
-        return text == null ? "" : text.replaceAll("\\s+", "").toLowerCase();
-    }
-
     // ── 公共工具 ────────────────────────────────────────────────────
 
-    private void buildUserSpec(ChatClient.PromptUserSpec spec, ChatRequest request, GalleryPicture saved) {
+    /**
+     * Build the full user text including selected-reference context.
+     */
+    private String buildUserText(ChatRequest request) {
         String text = request.message() != null ? request.message() : "";
         String referenceContext = buildSelectedReferenceContext(request.referencePictureIds());
         if (!referenceContext.isBlank()) {
             text = referenceContext + "\n【用户原始需求】\n" + text;
         }
-        spec.text(text);
-        Media media = chatMediaService.createMedia(saved, request.imageBase64(), request.imageUrl());
-        if (media != null) {
-            spec.media(media);
-        }
+        return text;
     }
 
     private String buildSelectedReferenceContext(List<Long> referenceIds) {
@@ -448,22 +389,24 @@ public class ChatServiceImpl implements ChatService {
         return data;
     }
 
-    /** Human-readable label for tool call progress display. */
+    /**
+     * Human-readable label for tool call progress display.
+     */
     private static String toolLabel(String toolName) {
         return switch (toolName) {
-            case "searchGallery"       -> "正在搜索图库";
-            case "getPictureInfo"      -> "正在获取图片详情";
-            case "analyzeImage"        -> "正在分析图片";
-            case "generateImage"       -> "正在生成图片";
-            case "listStyleTemplates"  -> "正在查询风格模板";
-            case "manageFavorite"      -> "正在更新收藏";
-            case "webSearch"           -> "正在搜索网页";
-            case "imageSearch"         -> "正在搜索网络图片";
-            case "webFetch"            -> "正在抓取网页";
-            case "downloadImage"       -> "正在下载图片";
-            case "searchAndDownload"   -> "正在搜索并下载图片";
-            case "importImage"         -> "正在导入图片";
-            default                    -> "正在调用 " + toolName;
+            case "searchGallery" -> "正在搜索图库";
+            case "getPictureInfo" -> "正在获取图片详情";
+            case "analyzeImage" -> "正在分析图片";
+            case "generateImage" -> "正在生成图片";
+            case "listStyleTemplates" -> "正在查询风格模板";
+            case "manageFavorite" -> "正在更新收藏";
+            case "webSearch" -> "正在搜索网页";
+            case "imageSearch" -> "正在搜索网络图片";
+            case "webFetch" -> "正在抓取网页";
+            case "downloadImage" -> "正在下载图片";
+            case "searchAndDownload" -> "正在搜索并下载图片";
+            case "importImage" -> "正在导入图片";
+            default -> "正在调用 " + toolName;
         };
     }
 }
