@@ -34,6 +34,36 @@ public final class TaskVerifier {
         };
     }
 
+    /**
+     * Verify against the explicit backend plan. This is the Phase C+ primary
+     * path; tool-call inference remains a fallback when no plan exists.
+     */
+    public static VerificationResult verify(TaskPlan plan, List<ToolExecutionRecord> records) {
+        if (plan == null) {
+            return verify(inferTaskType(records), records);
+        }
+        if (plan.taskType() == TaskType.NEED_CLARIFICATION) {
+            return VerificationResult.needMoreInfo("需要补充图片、参考图或更具体的目标描述");
+        }
+
+        VerificationResult result = verify(plan.taskType(), records);
+        if (result.deliverable()) {
+            return result;
+        }
+
+        for (TaskStep step : plan.steps()) {
+            if (!step.required() || step.toolName() == null) {
+                continue;
+            }
+            boolean hasSuccess = records != null && records.stream()
+                    .anyMatch(r -> step.toolName().equals(r.toolName()) && r.success());
+            if (!hasSuccess) {
+                return VerificationResult.failed("任务未完成：缺少必要步骤「" + step.description() + "」的成功证据");
+            }
+        }
+        return result;
+    }
+
     // ── per-task-type verification ──────────────────────────────────
 
     /** Image generation: must have generateImage success + imageUrl/imageBase64. */

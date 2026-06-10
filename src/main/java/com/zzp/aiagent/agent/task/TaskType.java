@@ -3,9 +3,9 @@ package com.zzp.aiagent.agent.task;
 /**
  * Classifies a user request into a known task category for verification.
  * <p>
- * Phase C determines the task type by inspecting which tools were actually
- * called (post-hoc), rather than requiring the model to pre-declare a plan.
- * A future Phase D may add an explicit {@code TaskPlanner} step.
+ * Phase C+ determines the primary task type before execution via
+ * {@link TaskPlanner}; post-hoc inference from tool calls remains as a
+ * compatibility fallback.
  */
 public enum TaskType {
 

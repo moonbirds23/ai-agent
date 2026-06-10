@@ -26,12 +26,16 @@ public class TaskLedger {
 
     private final ConcurrentMap<String, List<ToolExecutionRecord>> records = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, Integer> callCounts = new ConcurrentHashMap<>();
+    private final ConcurrentMap<String, TaskPlan> plans = new ConcurrentHashMap<>();
+    private final ConcurrentMap<String, TaskLifecycleStatus> statuses = new ConcurrentHashMap<>();
+    private final ConcurrentMap<String, VerificationResult> verifications = new ConcurrentHashMap<>();
 
     // ── lifecycle ───────────────────────────────────────────────────
 
     /** Called at the start of every @Tool method. Returns the current call count. */
     public int beforeCall(String turnId, String toolName, Map<String, Object> input) {
         if (turnId == null || turnId.isBlank()) return 0;
+        statuses.put(turnId, TaskLifecycleStatus.RUNNING);
         int count = callCounts.merge(turnId, 1, Integer::sum);
 
         // Global limit
@@ -74,6 +78,7 @@ public class TaskLedger {
         if (turnId == null || turnId.isBlank()) return;
         ToolExecutionRecord record = ToolExecutionRecord.success(turnId, toolName, input, output, sideEffect);
         append(turnId, record);
+        statuses.put(turnId, TaskLifecycleStatus.RUNNING);
         log.debug("[TaskLedger] {} success turnId={} sideEffect={}", toolName, turnId, sideEffect);
     }
 
@@ -83,7 +88,52 @@ public class TaskLedger {
         if (turnId == null || turnId.isBlank()) return;
         ToolExecutionRecord record = ToolExecutionRecord.failure(turnId, toolName, input, errorMessage);
         append(turnId, record);
+        statuses.put(turnId, TaskLifecycleStatus.RUNNING);
         log.debug("[TaskLedger] {} failed turnId={} error={}", toolName, turnId, errorMessage);
+    }
+
+    // ── task plan lifecycle ────────────────────────────────────────
+
+    public void startPlan(TaskPlan plan) {
+        if (plan == null || plan.turnId() == null || plan.turnId().isBlank()) return;
+        plans.put(plan.turnId(), plan);
+        statuses.put(plan.turnId(), TaskLifecycleStatus.PLANNED);
+        log.debug("[TaskLedger] plan started turnId={} type={}", plan.turnId(), plan.taskType());
+    }
+
+    public TaskPlan getPlan(String turnId) {
+        return turnId != null ? plans.get(turnId) : null;
+    }
+
+    public void markVerifying(String turnId) {
+        if (turnId != null && !turnId.isBlank()) {
+            statuses.put(turnId, TaskLifecycleStatus.VERIFYING);
+        }
+    }
+
+    public void completeVerification(String turnId, VerificationResult result) {
+        if (turnId == null || turnId.isBlank() || result == null) return;
+        verifications.put(turnId, result);
+        statuses.put(turnId, toLifecycle(result.status()));
+    }
+
+    public VerificationResult getVerification(String turnId) {
+        return turnId != null ? verifications.get(turnId) : null;
+    }
+
+    public TaskStatusSnapshot snapshot(String turnId) {
+        TaskPlan plan = getPlan(turnId);
+        List<ToolExecutionRecord> evidence = getRecords(turnId);
+        VerificationResult verification = getVerification(turnId);
+        TaskLifecycleStatus status = statuses.getOrDefault(turnId, TaskLifecycleStatus.PLANNED);
+        return new TaskStatusSnapshot(
+                turnId,
+                plan != null ? plan.taskType() : TaskVerifier.inferTaskType(evidence),
+                status,
+                plan != null ? plan.userGoal() : "",
+                plan != null ? plan.steps() : List.of(),
+                verification,
+                evidence);
     }
 
     // ── query ───────────────────────────────────────────────────────
@@ -126,6 +176,9 @@ public class TaskLedger {
         if (turnId != null && !turnId.isBlank()) {
             records.remove(turnId);
             callCounts.remove(turnId);
+            plans.remove(turnId);
+            statuses.remove(turnId);
+            verifications.remove(turnId);
         }
     }
 
@@ -143,5 +196,14 @@ public class TaskLedger {
     private static boolean isDownloadTool(String name) {
         return "downloadImage".equals(name) || "searchAndDownload".equals(name)
                 || "pexelsSearchAndImport".equals(name) || "importImage".equals(name);
+    }
+
+    private static TaskLifecycleStatus toLifecycle(TaskStatus status) {
+        return switch (status) {
+            case SUCCESS -> TaskLifecycleStatus.SUCCESS;
+            case PARTIAL_SUCCESS -> TaskLifecycleStatus.PARTIAL_SUCCESS;
+            case NEED_MORE_INFO -> TaskLifecycleStatus.NEED_MORE_INFO;
+            default -> TaskLifecycleStatus.FAILED;
+        };
     }
 }

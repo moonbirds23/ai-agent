@@ -1,5 +1,7 @@
 package com.zzp.aiagent.agent.task;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -13,9 +15,13 @@ public record ToolExecutionRecord(
         String toolName,
         Map<String, Object> input,
         Map<String, Object> output,
+        List<ResourceRef> resources,
         boolean success,
+        String errorCode,
         String errorMessage,
         String sideEffect,
+        boolean recoverable,
+        String recoveryHint,
         long startedAt,
         long finishedAt
 ) {
@@ -39,19 +45,69 @@ public record ToolExecutionRecord(
                                                String sideEffect) {
         long now = System.currentTimeMillis();
         return new ToolExecutionRecord(turnId, toolName, input, output,
-                true, null, sideEffect != null ? sideEffect : NONE, now, now);
+                inferResources(output), true, null, null,
+                sideEffect != null ? sideEffect : NONE, false, null, now, now);
     }
 
     public static ToolExecutionRecord failure(String turnId, String toolName,
                                                Map<String, Object> input,
                                                String errorMessage) {
         long now = System.currentTimeMillis();
-        return new ToolExecutionRecord(turnId, toolName, input, Map.of(),
-                false, errorMessage, NONE, now, now);
+        return failure(turnId, toolName, input, null, errorMessage, true, defaultRecoveryHint(toolName));
+    }
+
+    public static ToolExecutionRecord failure(String turnId, String toolName,
+                                               Map<String, Object> input,
+                                               String errorCode,
+                                               String errorMessage,
+                                               boolean recoverable,
+                                               String recoveryHint) {
+        long now = System.currentTimeMillis();
+        return new ToolExecutionRecord(turnId, toolName, input, Map.of(), List.of(),
+                false, errorCode, errorMessage, NONE, recoverable, recoveryHint, now, now);
     }
 
     /** Elapsed time in milliseconds. */
     public long elapsedMs() {
         return finishedAt - startedAt;
+    }
+
+    private static List<ResourceRef> inferResources(Map<String, Object> output) {
+        if (output == null || output.isEmpty()) {
+            return List.of();
+        }
+        List<ResourceRef> refs = new ArrayList<>();
+        Object imageUrl = output.get("imageUrl");
+        if (imageUrl instanceof String s && !s.isBlank()) {
+            refs.add(ResourceRef.image(s));
+        }
+        Object pictureId = output.get("pictureId");
+        if (pictureId != null) {
+            refs.add(ResourceRef.galleryPicture(pictureId, valueAsString(output.get("name"))));
+        }
+        Object pictureIds = output.get("pictureIds");
+        if (pictureIds instanceof Iterable<?> ids) {
+            for (Object id : ids) {
+                refs.add(ResourceRef.galleryPicture(id, null));
+            }
+        }
+        return List.copyOf(refs);
+    }
+
+    private static String valueAsString(Object value) {
+        return value instanceof String s ? s : null;
+    }
+
+    private static String defaultRecoveryHint(String toolName) {
+        if ("generateImage".equals(toolName)) {
+            return "可以稍后重试，或简化生图描述后再生成";
+        }
+        if ("searchGallery".equals(toolName)) {
+            return "可以更换关键词，或降级使用网络图片搜索";
+        }
+        if ("pexelsSearchPhotos".equals(toolName) || "imageSearch".equals(toolName)) {
+            return "可以更换关键词，或降级搜索本地图库";
+        }
+        return "可以稍后重试或补充更明确的信息";
     }
 }

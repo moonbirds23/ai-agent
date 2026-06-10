@@ -1,6 +1,6 @@
-# CLAUDE.md
+# AGENTS.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Codex (Codex.ai/code) when working with code in this repository.
 
 ## 双 AI 协作规则
 
@@ -47,7 +47,7 @@ Claude Code 回传执行结果应尽量包含：
 
 ## MD 记录准则
 
-核心原则：只写 AI 读代码发现不了的东西。`CLAUDE.md` 是给 AI 的开发手册，不是项目目录；写约定、写坑、写进度、写理由。
+核心原则：只写 AI 读代码发现不了的东西。`AGENTS.md` 是给 AI 的开发手册，不是项目目录；写约定、写坑、写进度、写理由。
 
 ### 必写
 
@@ -320,7 +320,7 @@ ChatServiceImpl (编排角色)
   └─ 后处理：guardHallucinatedImageResult / ChatResponseVO 构建
 ```
 
-核心原则：**意图由模型判断，结果由后端确认**。Agent 不重写工具执行循环（Spring AI 已成熟），而是在 Advisor 层补充状态管理、步数控制、可观测性。任务交付验收由 `ToolProgressContext`（Phase A）+ 后续 `TaskVerifier`（Phase C）负责。
+核心原则：**意图由模型判断，结果由后端确认**。Agent 不重写工具执行循环（Spring AI 已成熟），而是在 Advisor 层补充状态管理、步数控制、可观测性。任务交付验收已升级为 Phase C+ 生命周期闭环：`TaskPlanner` 先生成后端任务计划，`TaskLedger` 记录工具证据与生命周期状态，`TaskVerifier` 基于计划验收，`RecoveryPolicy` 给出失败恢复建议，`ResponseComposer` 修正模型幻觉输出；SSE 通过 `task_planned` / `task_verified` 返回结构化状态。
 
 ### 后续深入学习方向：手动 ReAct 循环
 
@@ -479,8 +479,9 @@ public interface ImageGenerationService {
 - [x] **Redis List trim 截断**（`RedisChatMemory.add()` 末尾 `trim(key, -maxMessages, -1)` 确保列表不无限增长）
 - [x] **PostgreSQL 默认化 + 经典 RAG 清理**（2026-06：删除 `GalleryRagRetriever`/`SimpleVectorStore`/`SimpleVectorIndexService`/JSON文件存储/`NoopChatHistoryRepository`/`VectorStorePersistence`；PG 配置合并到 `application.yml`；`@Profile("postgres")` → `@Profile("!test")`；删除 `@Primary`；`RagServiceImpl` 始终走增强检索；`PostgresAutoConfig` 按需导入 DataSource）
 - [x] **Pexels 图片搜索 @Tool 集成**（`PexelsSearchTools`：搜索/精选/下载入库/详情 4 工具，预留 `PexelsPhotoService` 接口支持后续 MCP 抽离）
-- [x] **Agent 核心框架 Phase A+B**（2026-06-05：`Agent` + `AgentConfig` + `AgentState` + `AgentContext` + `AgentTraceAdvisor`；ChatServiceImpl 委托 Agent 执行；system prompt 升级为推理框架+交付规则+终止条件；幻觉拦截改以 trace 为唯一权威；`ToolProgressContext` 工具计数+分类上限；生图保存失败不静默；CLAUDE.md 记录手动 ReAct 循环作为后续学习方向）
-- [ ] **Agent Phase C：任务验收层**（TaskLedger + TaskVerifier + ResponseComposer）
+- [x] **Agent 核心框架 Phase A+B**（2026-06-05：`Agent` + `AgentConfig` + `AgentState` + `AgentContext` + `AgentTraceAdvisor`；ChatServiceImpl 委托 Agent 执行；system prompt 升级为推理框架+交付规则+终止条件；幻觉拦截改以 trace 为唯一权威；`ToolProgressContext` 工具计数+分类上限；生图保存失败不静默；AGENTS.md 记录手动 ReAct 循环作为后续学习方向）
+- [x] **Agent Phase C MVP：任务验收层**（TaskLedger + TaskVerifier + ResponseComposer 已接入非流式/流式最终响应，基于工具证据修正模型“假装完成”）
+- [x] **Agent Phase C+：任务生命周期闭环**（2026-06-09：新增 TaskPlanner/TaskPlan/TaskStep 前置计划；TaskLedger 保存计划、生命周期状态、验收结果和工具证据；TaskVerifier 优先按计划验收，保留工具反推兜底；ToolExecutionRecord 增强 resources/errorCode/recoverable/recoveryHint；RecoveryPolicy 输出 retry/fallback/ask-user/partial 建议；SSE 新增 task_planned/task_verified 结构化事件）
 
 ## 测试分类
 

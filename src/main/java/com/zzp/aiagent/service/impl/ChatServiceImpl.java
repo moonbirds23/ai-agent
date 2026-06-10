@@ -2,8 +2,14 @@ package com.zzp.aiagent.service.impl;
 
 import com.zzp.aiagent.agent.Agent;
 import com.zzp.aiagent.agent.AgentConfig;
+import com.zzp.aiagent.agent.task.RecoveryPolicy;
 import com.zzp.aiagent.agent.task.ResponseComposer;
 import com.zzp.aiagent.agent.task.TaskLedger;
+import com.zzp.aiagent.agent.task.TaskPlan;
+import com.zzp.aiagent.agent.task.TaskPlanner;
+import com.zzp.aiagent.agent.task.TaskType;
+import com.zzp.aiagent.agent.task.ToolExecutionRecord;
+import com.zzp.aiagent.agent.task.VerificationResult;
 import com.zzp.aiagent.common.ThrowUtils;
 import com.zzp.aiagent.domain.gallery.GalleryImportUrlRequest;
 import com.zzp.aiagent.domain.gallery.GalleryUploadRequest;
@@ -46,6 +52,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Chat service — orchestration role.
@@ -66,6 +74,8 @@ public class ChatServiceImpl implements ChatService {
 
     private static final long MAX_IMAGE_BYTES = 10 * 1024 * 1024;
     private static final Set<String> ALLOWED_IMAGE_TYPES = Set.of("png", "jpeg", "jpg", "webp", "gif");
+    private static final Pattern PSEUDO_SEARCH_GALLERY =
+            Pattern.compile("^\\s*searchGallery\\([\"“](.*?)[\"”]\\)\\s*$");
 
     private final Agent agent;
     private final GalleryService galleryService;
@@ -75,6 +85,8 @@ public class ChatServiceImpl implements ChatService {
     private final CurrentImageContext currentImageContext;
     private final ToolProgressContext toolProgressContext;
     private final TaskLedger taskLedger;
+    private final TaskPlanner taskPlanner;
+    private final RecoveryPolicy recoveryPolicy;
 
     public ChatServiceImpl(ChatModel openAiChatModel, ChatMemory chatMemory, PromptTemplate promptTemplate,
                            GalleryAgentTools galleryAgentTools,
@@ -86,7 +98,9 @@ public class ChatServiceImpl implements ChatService {
                            ConversationLimitService conversationLimitService,
                            CurrentImageContext currentImageContext,
                            ToolProgressContext toolProgressContext,
-                           TaskLedger taskLedger) {
+                           TaskLedger taskLedger,
+                           TaskPlanner taskPlanner,
+                           RecoveryPolicy recoveryPolicy) {
         this.galleryService = galleryService;
         this.pictureAiProfileService = pictureAiProfileService;
         this.chatMediaService = chatMediaService;
@@ -94,6 +108,8 @@ public class ChatServiceImpl implements ChatService {
         this.currentImageContext = currentImageContext;
         this.toolProgressContext = toolProgressContext;
         this.taskLedger = taskLedger;
+        this.taskPlanner = taskPlanner;
+        this.recoveryPolicy = recoveryPolicy;
 
         this.agent = new Agent("cloud-gallery-agent",
                 AgentConfig.of("cloud-gallery-agent"),
@@ -112,6 +128,8 @@ public class ChatServiceImpl implements ChatService {
         conversationLimitService.checkLimit(chatId);
         GalleryPicture saved = autoSaveToCacheGallery(request);
         String turnId = newTurnId(chatId);
+        TaskPlan plan = taskPlanner.plan(request, turnId);
+        taskLedger.startPlan(plan);
         currentImageContext.bind(turnId, extractImageBase64(request));
 
         try {
@@ -132,7 +150,8 @@ public class ChatServiceImpl implements ChatService {
                 }
             }
 
-            String safeResponse = ResponseComposer.composeVerified(response, taskLedger, turnId);
+            String effectiveResponse = executePlannedFallbackIfNeeded(plan, turnId, response);
+            String safeResponse = ResponseComposer.composeVerified(effectiveResponse, taskLedger, turnId, recoveryPolicy);
             return ChatResponseVO.textOnly(chatId, safeResponse);
         } finally {
             toolProgressContext.clear(turnId);
@@ -148,6 +167,8 @@ public class ChatServiceImpl implements ChatService {
         conversationLimitService.checkLimit(chatId);
         GalleryPicture saved = autoSaveToCacheGallery(request);
         String turnId = newTurnId(chatId);
+        TaskPlan plan = taskPlanner.plan(request, turnId);
+        taskLedger.startPlan(plan);
         currentImageContext.bind(turnId, extractImageBase64(request));
 
         String userText = buildUserText(request);
@@ -189,8 +210,11 @@ public class ChatServiceImpl implements ChatService {
 
         Flux<StreamEventVO> doneEvent = Flux.defer(() -> {
             String fullText = accumulator.toString();
-            String safeText = ResponseComposer.composeVerified(fullText, taskLedger, turnId);
-            return Flux.just(StreamEventVO.done(chatId, ChatResponseVO.textOnly(chatId, safeText)));
+            String effectiveText = executePlannedFallbackIfNeeded(plan, turnId, fullText);
+            String safeText = ResponseComposer.composeVerified(effectiveText, taskLedger, turnId, recoveryPolicy);
+            return Flux.just(
+                    StreamEventVO.taskVerified(chatId, taskLedger.snapshot(turnId)),
+                    StreamEventVO.done(chatId, ChatResponseVO.textOnly(chatId, safeText)));
         });
 
         Flux<StreamEventVO> mergedEvents = Flux.merge(
@@ -200,6 +224,7 @@ public class ChatServiceImpl implements ChatService {
 
         return Flux.concat(
                 Flux.just(StreamEventVO.chatId(chatId)),
+                Flux.just(StreamEventVO.taskPlanned(chatId, taskLedger.snapshot(turnId))),
                 mergedEvents,
                 doneEvent
         ).onErrorResume(e -> {
@@ -211,7 +236,11 @@ public class ChatServiceImpl implements ChatService {
                 log.error("[Stream] 未知异常 chatId={}", chatId, e);
                 errorMsg = "处理异常，请重试";
             }
-            return Flux.just(StreamEventVO.error(errorMsg));
+            taskLedger.markVerifying(turnId);
+            taskLedger.completeVerification(turnId, VerificationResult.failed(errorMsg));
+            return Flux.just(
+                    StreamEventVO.taskVerified(chatId, taskLedger.snapshot(turnId)),
+                    StreamEventVO.error(errorMsg));
         }).doFinally(signal -> {
             toolProgressContext.clear(turnId);
             taskLedger.clear(turnId);
@@ -231,6 +260,74 @@ public class ChatServiceImpl implements ChatService {
 
     private static String newTurnId(String chatId) {
         return chatId + ":" + UUID.randomUUID();
+    }
+
+    /**
+     * Some models emit textual pseudo tool calls instead of real tool calls.
+     * For deterministic, read-only tasks we can safely execute the backend action
+     * and write authoritative evidence before verification.
+     */
+    private String executePlannedFallbackIfNeeded(TaskPlan plan, String turnId, String modelText) {
+        if (plan == null || plan.taskType() != TaskType.GALLERY_SEARCH) {
+            return modelText;
+        }
+        if (taskLedger.countSuccess(turnId, "searchGallery") > 0) {
+            return modelText;
+        }
+        String query = extractPseudoGalleryQuery(modelText);
+        if (query == null || query.isBlank()) {
+            query = plan.userGoal();
+        }
+        return executeGallerySearchFallback(turnId, query, 5);
+    }
+
+    private String executeGallerySearchFallback(String turnId, String query, int limit) {
+        String q = query != null ? query.strip() : "";
+        Map<String, Object> input = Map.of("query", q, "limit", limit);
+        taskLedger.beforeCall(turnId, "searchGallery", input);
+        try {
+            List<GalleryPicture> results = !q.isBlank() ? galleryService.search(q, limit) : List.of();
+            taskLedger.recordSuccess(turnId, "searchGallery", input,
+                    Map.of("resultCount", results.size()), ToolExecutionRecord.NONE);
+            return formatGallerySearchResult(q, results);
+        } catch (Exception e) {
+            taskLedger.recordFailure(turnId, "searchGallery", input, e.getMessage());
+            return "图库搜索失败：" + e.getMessage();
+        }
+    }
+
+    private static String extractPseudoGalleryQuery(String text) {
+        if (text == null) {
+            return null;
+        }
+        Matcher matcher = PSEUDO_SEARCH_GALLERY.matcher(text);
+        return matcher.matches() ? matcher.group(1).strip() : null;
+    }
+
+    private static String formatGallerySearchResult(String query, List<GalleryPicture> results) {
+        if (results == null || results.isEmpty()) {
+            return "图库中没有找到与「" + query + "」相关的图片。";
+        }
+        int showCount = Math.min(results.size(), 3);
+        StringBuilder sb = new StringBuilder("找到 ").append(results.size())
+                .append(" 张相关图片，前 ").append(showCount).append(" 张：\n");
+        for (int i = 0; i < showCount; i++) {
+            GalleryPicture picture = results.get(i);
+            sb.append(i + 1).append(". [ID:").append(picture.id()).append("] ")
+                    .append(picture.name() != null ? picture.name() : "未命名");
+            if (picture.introduction() != null && !picture.introduction().isBlank()) {
+                sb.append(" - ").append(picture.introduction());
+            }
+            sb.append("\n");
+        }
+        if (results.size() > showCount) {
+            sb.append("其余 ").append(results.size() - showCount).append(" 张编号：");
+            List<String> restIds = results.subList(showCount, results.size()).stream()
+                    .map(p -> "[ID:" + p.id() + "] " + (p.name() != null ? p.name() : "未命名"))
+                    .toList();
+            sb.append(String.join("、", restIds));
+        }
+        return sb.toString().trim();
     }
 
     // ── 公共工具 ────────────────────────────────────────────────────

@@ -1,6 +1,8 @@
 package com.zzp.aiagent.app;
 
 import com.zzp.aiagent.agent.task.TaskLedger;
+import com.zzp.aiagent.agent.task.TaskPlanner;
+import com.zzp.aiagent.agent.task.RecoveryPolicy;
 import com.zzp.aiagent.common.UrlSecurityValidator;
 import com.zzp.aiagent.model.dto.chat.ChatRequest;
 import com.zzp.aiagent.model.vo.ChatResponseVO;
@@ -57,6 +59,8 @@ class ChatServiceImplTest {
     private CurrentImageContext currentImageContext;
     private ToolProgressContext toolProgressContext;
     private TaskLedger taskLedger;
+    private TaskPlanner taskPlanner;
+    private RecoveryPolicy recoveryPolicy;
     private ChatServiceImpl chatService;
 
     @BeforeEach
@@ -72,6 +76,8 @@ class ChatServiceImplTest {
         currentImageContext = new CurrentImageContext();
         toolProgressContext = new ToolProgressContext();
         taskLedger = new TaskLedger();
+        taskPlanner = new TaskPlanner();
+        recoveryPolicy = new RecoveryPolicy();
 
         // Default: model returns plain text (no tool calls)
         when(chatModel.call(any(Prompt.class)))
@@ -94,7 +100,9 @@ class ChatServiceImplTest {
                 conversationLimitService,
                 currentImageContext,
                 toolProgressContext,
-                taskLedger);
+                taskLedger,
+                taskPlanner,
+                recoveryPolicy);
     }
 
     // ── Non-streaming ─────────────────────────────────────────────
@@ -162,8 +170,10 @@ class ChatServiceImplTest {
 
             StepVerifier.create(chatService.chatStream(request, "test-stream-1"))
                     .assertNext(event -> assertThat(event.type()).isEqualTo("chatId"))
+                    .assertNext(event -> assertThat(event.type()).isEqualTo("task_planned"))
                     .assertNext(event -> assertThat(event.type()).isEqualTo("token"))
                     .assertNext(event -> assertThat(event.type()).isEqualTo("token"))
+                    .assertNext(event -> assertThat(event.type()).isEqualTo("task_verified"))
                     .assertNext(event -> assertThat(event.type()).isEqualTo("done"))
                     .verifyComplete();
         }
@@ -176,11 +186,14 @@ class ChatServiceImplTest {
 
             ChatRequest request = new ChatRequest("hello", null, null, null, null);
 
-            // ExceptionGuardAdvisor catches the error → friendly message as token → done
             StepVerifier.create(chatService.chatStream(request, "test-stream-error"))
-                    .assertNext(event -> assertThat(event.type()).isEqualTo("chatId"))
-                    .assertNext(event -> assertThat(event.type()).isIn("token", "error"))
-                    .assertNext(event -> assertThat(event.type()).isIn("done", "error"))
+                    .recordWith(java.util.ArrayList::new)
+                    .thenConsumeWhile(event -> true)
+                    .consumeRecordedWith(events -> {
+                        List<String> types = events.stream().map(StreamEventVO::type).toList();
+                        assertThat(types).startsWith("chatId", "task_planned");
+                        assertThat(types).anyMatch(type -> type.equals("done") || type.equals("error"));
+                    })
                     .verifyComplete();
         }
     }

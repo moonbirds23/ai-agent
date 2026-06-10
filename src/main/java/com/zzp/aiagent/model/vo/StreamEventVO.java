@@ -37,6 +37,14 @@ public record StreamEventVO(
         return new StreamEventVO("image_generated", chatId, null, data);
     }
 
+    public static StreamEventVO taskPlanned(String chatId, Object data) {
+        return new StreamEventVO("task_planned", chatId, null, data);
+    }
+
+    public static StreamEventVO taskVerified(String chatId, Object data) {
+        return new StreamEventVO("task_verified", chatId, null, data);
+    }
+
     /** Emitted when the model invokes a tool — shows the thinking process to the user. */
     public static StreamEventVO toolCall(String toolName, String label, String chatId) {
         return new StreamEventVO("tool_call", chatId, label, null);

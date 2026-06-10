@@ -55,8 +55,24 @@ public final class ResponseComposer {
      */
     public static String composeVerified(String modelResponse, TaskLedger ledger, String turnId) {
         List<ToolExecutionRecord> records = ledger.getRecords(turnId);
-        TaskType taskType = TaskVerifier.inferTaskType(records);
-        VerificationResult vr = TaskVerifier.verify(taskType, records);
+        TaskPlan plan = ledger.getPlan(turnId);
+        ledger.markVerifying(turnId);
+        VerificationResult vr = TaskVerifier.verify(plan, records);
+        ledger.completeVerification(turnId, vr);
         return compose(modelResponse, vr);
+    }
+
+    public static String composeVerified(String modelResponse, TaskLedger ledger, String turnId,
+                                         RecoveryPolicy recoveryPolicy) {
+        String composed = composeVerified(modelResponse, ledger, turnId);
+        VerificationResult vr = ledger.getVerification(turnId);
+        if (recoveryPolicy == null || vr == null || vr.deliverable()) {
+            return composed;
+        }
+        RecoveryAction action = recoveryPolicy.decide(ledger.getPlan(turnId), vr, ledger.getRecords(turnId));
+        if (action.type() == RecoveryActionType.NONE || action.message() == null || action.message().isBlank()) {
+            return composed;
+        }
+        return composed + "\n\n【恢复建议】" + action.message();
     }
 }
