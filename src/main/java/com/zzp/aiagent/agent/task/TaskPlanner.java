@@ -33,7 +33,8 @@ public class TaskPlanner {
                 steps,
                 hasImage,
                 requiresGeneration(type),
-                requiresExternalSearch(type));
+                requiresExternalSearch(type),
+                java.util.Map.of());
     }
 
     private TaskType classify(String text, String mode, boolean hasImage, boolean hasReferences) {

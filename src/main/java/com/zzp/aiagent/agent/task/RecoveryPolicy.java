@@ -3,13 +3,10 @@ package com.zzp.aiagent.agent.task;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * Decides how the backend should explain or recover from a failed task.
- * <p>
- * The first implementation is conservative: it does not recursively run tools
- * after the model has finished, but it returns structured recovery guidance for
- * the final response and frontend.
  */
 @Component
 public class RecoveryPolicy {
@@ -24,6 +21,21 @@ public class RecoveryPolicy {
         if (plan.taskType() == TaskType.NEED_CLARIFICATION) {
             return RecoveryAction.askUser("需要补充图片、参考图或更具体的目标描述");
         }
+
+        Map<String, Boolean> stepResults = TaskVerifier.verifySteps(plan, records);
+        long passedCount = stepResults.values().stream().filter(Boolean::booleanValue).count();
+        long totalRequired = plan.steps().stream().filter(TaskStep::required).count();
+
+        if (passedCount > 0 && passedCount < totalRequired) {
+            List<String> failedSteps = stepResults.entrySet().stream()
+                    .filter(e -> !e.getValue())
+                    .map(Map.Entry::getKey)
+                    .toList();
+            return RecoveryAction.partial(
+                    "部分步骤已完成，以下步骤未成功：" + String.join("、", failedSteps)
+                    + "。可以尝试简化需求或单独重试失败步骤。");
+        }
+
         if (hasFailed(records, "pexelsSearchPhotos")) {
             return RecoveryAction.fallback("网络图片搜索失败，可降级使用图库搜索或更换关键词", "searchGallery");
         }
@@ -36,6 +48,11 @@ public class RecoveryPolicy {
         if (plan.requiresImage()) {
             return RecoveryAction.askUser("当前任务需要图片输入，请上传图片或选择图库参考图");
         }
+
+        if (passedCount == 0 && totalRequired > 0) {
+            return RecoveryAction.askUser("所有步骤均未成功执行，请检查需求是否明确，或换个方式描述任务");
+        }
+
         return RecoveryAction.askUser(result.userMessage());
     }
 
@@ -43,5 +60,4 @@ public class RecoveryPolicy {
         return records != null && records.stream()
                 .anyMatch(r -> toolName.equals(r.toolName()) && !r.success());
     }
-
 }

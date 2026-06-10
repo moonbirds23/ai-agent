@@ -1,6 +1,7 @@
 package com.zzp.aiagent.agent.task;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * Backend-owned plan for one user turn.
@@ -15,11 +16,16 @@ public record TaskPlan(
         List<TaskStep> steps,
         boolean requiresImage,
         boolean requiresGeneration,
-        boolean requiresExternalSearch
+        boolean requiresExternalSearch,
+        Map<String, Object> slots
 ) {
+    public TaskPlan {
+        if (slots == null) slots = Map.of();
+    }
+
     public static TaskPlan chat(String turnId, String userGoal) {
         return new TaskPlan(turnId, TaskType.CHAT, userGoal,
                 List.of(TaskStep.of("respond", "生成对话回复", true, null)),
-                false, false, false);
+                false, false, false, Map.of());
     }
 }

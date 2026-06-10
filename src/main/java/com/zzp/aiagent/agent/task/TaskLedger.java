@@ -29,6 +29,7 @@ public class TaskLedger {
     private final ConcurrentMap<String, TaskPlan> plans = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, TaskLifecycleStatus> statuses = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, VerificationResult> verifications = new ConcurrentHashMap<>();
+    private final ConcurrentMap<String, Map<String, StepStatus>> stepStatuses = new ConcurrentHashMap<>();
 
     // ── lifecycle ───────────────────────────────────────────────────
 
@@ -132,8 +133,55 @@ public class TaskLedger {
                 status,
                 plan != null ? plan.userGoal() : "",
                 plan != null ? plan.steps() : List.of(),
+                getStepStatuses(turnId),
                 verification,
+                null,
                 evidence);
+    }
+
+    // ── step-level tracking ─────────────────────────────────────────
+
+    public void startStep(String turnId, String stepCode) {
+        if (turnId == null || turnId.isBlank() || stepCode == null) return;
+        stepStatuses.computeIfAbsent(turnId, k -> new ConcurrentHashMap<>())
+                .put(stepCode, StepStatus.RUNNING);
+        statuses.put(turnId, TaskLifecycleStatus.RUNNING);
+        log.debug("[TaskLedger] step started turnId={} step={}", turnId, stepCode);
+    }
+
+    public void completeStep(String turnId, String stepCode, ToolExecutionRecord record) {
+        if (turnId == null || turnId.isBlank() || stepCode == null) return;
+        stepStatuses.computeIfAbsent(turnId, k -> new ConcurrentHashMap<>())
+                .put(stepCode, StepStatus.SUCCESS);
+        if (record != null) {
+            append(turnId, record);
+        }
+        log.debug("[TaskLedger] step completed turnId={} step={}", turnId, stepCode);
+    }
+
+    public void failStep(String turnId, String stepCode, String error) {
+        if (turnId == null || turnId.isBlank() || stepCode == null) return;
+        stepStatuses.computeIfAbsent(turnId, k -> new ConcurrentHashMap<>())
+                .put(stepCode, StepStatus.FAILED);
+        log.debug("[TaskLedger] step failed turnId={} step={} error={}", turnId, stepCode, error);
+    }
+
+    public void skipStep(String turnId, String stepCode) {
+        if (turnId == null || turnId.isBlank() || stepCode == null) return;
+        stepStatuses.computeIfAbsent(turnId, k -> new ConcurrentHashMap<>())
+                .put(stepCode, StepStatus.SKIPPED);
+    }
+
+    public StepStatus getStepStatus(String turnId, String stepCode) {
+        if (turnId == null || stepCode == null) return StepStatus.PENDING;
+        Map<String, StepStatus> map = stepStatuses.get(turnId);
+        return map != null ? map.getOrDefault(stepCode, StepStatus.PENDING) : StepStatus.PENDING;
+    }
+
+    public Map<String, StepStatus> getStepStatuses(String turnId) {
+        if (turnId == null) return Map.of();
+        Map<String, StepStatus> map = stepStatuses.get(turnId);
+        return map != null ? Map.copyOf(map) : Map.of();
     }
 
     // ── query ───────────────────────────────────────────────────────
@@ -179,6 +227,7 @@ public class TaskLedger {
             plans.remove(turnId);
             statuses.remove(turnId);
             verifications.remove(turnId);
+            stepStatuses.remove(turnId);
         }
     }
 

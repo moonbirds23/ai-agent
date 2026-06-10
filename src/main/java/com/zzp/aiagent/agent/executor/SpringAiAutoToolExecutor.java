@@ -1,0 +1,89 @@
+package com.zzp.aiagent.agent.executor;
+
+import com.zzp.aiagent.agent.AgentConfig;
+import com.zzp.aiagent.agent.AgentResult;
+import com.zzp.aiagent.agent.AgentState;
+import com.zzp.aiagent.agent.AgentTraceAdvisor;
+import com.zzp.aiagent.advisor.ContentGuardAdvisor;
+import com.zzp.aiagent.advisor.ExceptionGuardAdvisor;
+import com.zzp.aiagent.advisor.LoggingAdvisor;
+import com.zzp.aiagent.utils.PromptTemplate;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.client.ChatClientResponse;
+import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
+import org.springframework.ai.chat.memory.ChatMemory;
+import org.springframework.ai.chat.model.ChatModel;
+import org.springframework.context.annotation.Profile;
+import org.springframework.stereotype.Component;
+import reactor.core.publisher.Flux;
+
+import java.util.Map;
+
+@Slf4j
+@Component
+@Profile("!test")
+public class SpringAiAutoToolExecutor implements AgentExecutor {
+
+    private final ChatClient chatClient;
+
+    public SpringAiAutoToolExecutor(ChatModel chatModel, ChatMemory chatMemory,
+                                     PromptTemplate promptTemplate, Object[] tools) {
+        String systemPrompt = promptTemplate.render("default", "system");
+        this.chatClient = ChatClient.builder(chatModel)
+                .defaultSystem(systemPrompt)
+                .defaultTools(tools)
+                .defaultAdvisors(
+                        new ContentGuardAdvisor(),
+                        new AgentTraceAdvisor(AgentConfig.of("auto-executor")),
+                        MessageChatMemoryAdvisor.builder(chatMemory).build(),
+                        new LoggingAdvisor(),
+                        new ExceptionGuardAdvisor()
+                )
+                .build();
+    }
+
+    @Override
+    public AgentResult execute(AgentInput input) {
+        log.debug("[AutoExecutor] execute chatId={}", input.chatId());
+        try {
+            String content = chatClient.prompt()
+                    .user(spec -> {
+                        spec.text(input.userText() != null ? input.userText() : "");
+                        if (input.userMedia() != null) {
+                            spec.media(input.userMedia());
+                        }
+                    })
+                    .toolContext(input.toolContext() != null ? input.toolContext() : Map.of())
+                    .advisors(spec -> spec
+                            .param(ChatMemory.CONVERSATION_ID, input.chatId())
+                            .param("chatId", input.chatId()))
+                    .call()
+                    .content();
+            return new AgentResult(AgentState.FINISHED, content, null);
+        } catch (Exception e) {
+            log.error("[AutoExecutor] error chatId={}: {}", input.chatId(), e.getMessage());
+            return new AgentResult(AgentState.ERROR, e.getMessage(), null);
+        }
+    }
+
+    @Override
+    public Flux<ChatClientResponse> stream(AgentInput input) {
+        log.debug("[AutoExecutor] stream chatId={}", input.chatId());
+        return chatClient.prompt()
+                .user(spec -> {
+                    spec.text(input.userText() != null ? input.userText() : "");
+                    if (input.userMedia() != null) {
+                        spec.media(input.userMedia());
+                    }
+                })
+                .toolContext(input.toolContext() != null ? input.toolContext() : Map.of())
+                .advisors(spec -> spec
+                        .param(ChatMemory.CONVERSATION_ID, input.chatId())
+                        .param("chatId", input.chatId()))
+                .stream()
+                .chatClientResponse()
+                .doOnComplete(() -> log.debug("[AutoExecutor] stream complete chatId={}", input.chatId()))
+                .doOnError(e -> log.error("[AutoExecutor] stream error chatId={}", input.chatId(), e));
+    }
+}

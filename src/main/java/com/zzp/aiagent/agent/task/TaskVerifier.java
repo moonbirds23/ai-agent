@@ -238,4 +238,26 @@ public final class TaskVerifier {
         return "downloadImage".equals(name) || "importImage".equals(name)
                 || "searchAndDownload".equals(name) || "pexelsSearchAndImport".equals(name);
     }
+
+    /**
+     * Step-level verification: checks each required step for success evidence.
+     */
+    public static java.util.Map<String, Boolean> verifySteps(TaskPlan plan, List<ToolExecutionRecord> records) {
+        if (plan == null || plan.steps() == null) return java.util.Map.of();
+        java.util.Map<String, Boolean> result = new java.util.LinkedHashMap<>();
+        for (TaskStep step : plan.steps()) {
+            if (!step.required()) {
+                result.put(step.code(), true);
+                continue;
+            }
+            if (step.toolName() == null) {
+                result.put(step.code(), true);
+                continue;
+            }
+            boolean hasSuccess = records != null && records.stream()
+                    .anyMatch(r -> step.toolName().equals(r.toolName()) && r.success());
+            result.put(step.code(), hasSuccess);
+        }
+        return result;
+    }
 }

@@ -45,6 +45,25 @@ public record StreamEventVO(
         return new StreamEventVO("task_verified", chatId, null, data);
     }
 
+    public static StreamEventVO taskStepStarted(String chatId, String stepCode, String description) {
+        return new StreamEventVO("task_step_started", chatId, description,
+                java.util.Map.of("stepCode", stepCode));
+    }
+
+    public static StreamEventVO taskStepCompleted(String chatId, String stepCode, String description) {
+        return new StreamEventVO("task_step_completed", chatId, description,
+                java.util.Map.of("stepCode", stepCode));
+    }
+
+    public static StreamEventVO taskStepFailed(String chatId, String stepCode, String error) {
+        return new StreamEventVO("task_step_failed", chatId, error,
+                java.util.Map.of("stepCode", stepCode));
+    }
+
+    public static StreamEventVO recoverySuggested(String chatId, String message) {
+        return new StreamEventVO("recovery_suggested", chatId, message, null);
+    }
+
     /** Emitted when the model invokes a tool — shows the thinking process to the user. */
     public static StreamEventVO toolCall(String toolName, String label, String chatId) {
         return new StreamEventVO("tool_call", chatId, label, null);
