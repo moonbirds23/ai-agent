@@ -116,6 +116,14 @@ public class TaskLedger {
         if (turnId == null || turnId.isBlank() || result == null) return;
         verifications.put(turnId, result);
         statuses.put(turnId, toLifecycle(result.status()));
+        TaskPlan plan = plans.get(turnId);
+        if (plan != null) {
+            Map<String, Boolean> verifiedSteps = TaskVerifier.verifySteps(plan, getRecords(turnId));
+            Map<String, StepStatus> current = stepStatuses.computeIfAbsent(
+                    turnId, ignored -> new ConcurrentHashMap<>());
+            verifiedSteps.forEach((code, success) ->
+                    current.put(code, success ? StepStatus.SUCCESS : StepStatus.FAILED));
+        }
     }
 
     public VerificationResult getVerification(String turnId) {
@@ -123,10 +131,17 @@ public class TaskLedger {
     }
 
     public TaskStatusSnapshot snapshot(String turnId) {
+        return snapshot(turnId, null);
+    }
+
+    public TaskStatusSnapshot snapshot(String turnId, RecoveryPolicy recoveryPolicy) {
         TaskPlan plan = getPlan(turnId);
         List<ToolExecutionRecord> evidence = getRecords(turnId);
         VerificationResult verification = getVerification(turnId);
         TaskLifecycleStatus status = statuses.getOrDefault(turnId, TaskLifecycleStatus.PLANNED);
+        RecoveryAction recovery = recoveryPolicy != null && verification != null
+                ? recoveryPolicy.decide(plan, verification, evidence)
+                : null;
         return new TaskStatusSnapshot(
                 turnId,
                 plan != null ? plan.taskType() : TaskVerifier.inferTaskType(evidence),
@@ -135,7 +150,7 @@ public class TaskLedger {
                 plan != null ? plan.steps() : List.of(),
                 getStepStatuses(turnId),
                 verification,
-                null,
+                recovery,
                 evidence);
     }
 

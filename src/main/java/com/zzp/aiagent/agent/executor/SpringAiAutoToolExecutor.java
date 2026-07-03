@@ -11,14 +11,15 @@ import com.zzp.aiagent.utils.PromptTemplate;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.ChatClientResponse;
-import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
-import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
 
 import java.util.Map;
+import com.zzp.aiagent.tool.GalleryAgentTools;
+import com.zzp.aiagent.tool.PexelsSearchTools;
+import com.zzp.aiagent.tool.WebSearchTools;
 
 @Slf4j
 @Component
@@ -27,16 +28,18 @@ public class SpringAiAutoToolExecutor implements AgentExecutor {
 
     private final ChatClient chatClient;
 
-    public SpringAiAutoToolExecutor(ChatModel chatModel, ChatMemory chatMemory,
-                                     PromptTemplate promptTemplate, Object[] tools) {
+    public SpringAiAutoToolExecutor(ChatModel chatModel,
+                                     PromptTemplate promptTemplate,
+                                     GalleryAgentTools galleryAgentTools,
+                                     WebSearchTools webSearchTools,
+                                     PexelsSearchTools pexelsSearchTools) {
         String systemPrompt = promptTemplate.render("default", "system");
         this.chatClient = ChatClient.builder(chatModel)
                 .defaultSystem(systemPrompt)
-                .defaultTools(tools)
+                .defaultTools(galleryAgentTools, webSearchTools, pexelsSearchTools)
                 .defaultAdvisors(
                         new ContentGuardAdvisor(),
                         new AgentTraceAdvisor(AgentConfig.of("auto-executor")),
-                        MessageChatMemoryAdvisor.builder(chatMemory).build(),
                         new LoggingAdvisor(),
                         new ExceptionGuardAdvisor()
                 )
@@ -47,17 +50,19 @@ public class SpringAiAutoToolExecutor implements AgentExecutor {
     public AgentResult execute(AgentInput input) {
         log.debug("[AutoExecutor] execute chatId={}", input.chatId());
         try {
-            String content = chatClient.prompt()
+            var request = chatClient.prompt();
+            if (!input.memoryMessages().isEmpty()) {
+                request.messages(input.memoryMessages());
+            }
+            String content = request
                     .user(spec -> {
-                        spec.text(input.userText() != null ? input.userText() : "");
+                        spec.text(input.modelInput());
                         if (input.userMedia() != null) {
                             spec.media(input.userMedia());
                         }
                     })
                     .toolContext(input.toolContext() != null ? input.toolContext() : Map.of())
-                    .advisors(spec -> spec
-                            .param(ChatMemory.CONVERSATION_ID, input.chatId())
-                            .param("chatId", input.chatId()))
+                    .advisors(spec -> spec.param("chatId", input.chatId()))
                     .call()
                     .content();
             return new AgentResult(AgentState.FINISHED, content, null);
@@ -70,17 +75,19 @@ public class SpringAiAutoToolExecutor implements AgentExecutor {
     @Override
     public Flux<ChatClientResponse> stream(AgentInput input) {
         log.debug("[AutoExecutor] stream chatId={}", input.chatId());
-        return chatClient.prompt()
+        var request = chatClient.prompt();
+        if (!input.memoryMessages().isEmpty()) {
+            request.messages(input.memoryMessages());
+        }
+        return request
                 .user(spec -> {
-                    spec.text(input.userText() != null ? input.userText() : "");
+                    spec.text(input.modelInput());
                     if (input.userMedia() != null) {
                         spec.media(input.userMedia());
                     }
                 })
                 .toolContext(input.toolContext() != null ? input.toolContext() : Map.of())
-                .advisors(spec -> spec
-                        .param(ChatMemory.CONVERSATION_ID, input.chatId())
-                        .param("chatId", input.chatId()))
+                .advisors(spec -> spec.param("chatId", input.chatId()))
                 .stream()
                 .chatClientResponse()
                 .doOnComplete(() -> log.debug("[AutoExecutor] stream complete chatId={}", input.chatId()))

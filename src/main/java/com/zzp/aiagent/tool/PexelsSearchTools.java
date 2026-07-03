@@ -116,7 +116,7 @@ public class PexelsSearchTools {
                     .append("返回前 ").append(result.photos().size()).append(" 张：\n");
             for (int i = 0; i < result.photos().size(); i++) {
                 PexelsPhoto p = result.photos().get(i);
-                sb.append(i + 1).append(". [ID:").append(p.id()).append("] ");
+                sb.append(i + 1).append(". [Pexels ID:").append(p.id()).append("] ");
                 if (p.alt() != null && !p.alt().isBlank()) {
                     sb.append(p.alt());
                 } else {

@@ -1,0 +1,77 @@
+# ============================================================
+# Production profile overrides
+# ============================================================
+
+app:
+  api-key: ${APP_API_KEY}
+  rag:
+    enabled: true
+  chat-memory:
+    max-conversation-messages: 200
+  pexels:
+    api-key: ${PEXELS_API_KEY}
+
+# --- Datasource (PostgreSQL via env vars) ---
+spring:
+  datasource:
+    url: ${DB_URL}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 20
+      minimum-idle: 5
+      connection-timeout: 5000
+      idle-timeout: 300000
+      max-lifetime: 1200000
+      leak-detection-threshold: 10000
+
+  # --- Redis via env vars ---
+  data:
+    redis:
+      host: ${REDIS_HOST}
+      port: ${REDIS_PORT}
+      password: ${REDIS_PASSWORD}
+      timeout: 3000ms
+
+  # --- JPA / OSIV ---
+  jpa:
+    open-in-view: false
+
+# --- Zhipu / Pexels API keys ---
+zhipu:
+  api-key: ${ZHIPU_API_KEY}
+  image:
+    api-key: ${ZHIPU_API_KEY}
+  vision:
+    api-key: ${ZHIPU_API_KEY}
+
+
+# --- Server ---
+server:
+  shutdown: graceful
+  compression:
+    enabled: true
+    mime-types: application/json,application/xml,text/html,text/plain,text/css,application/javascript
+  tomcat:
+    connection-timeout: 30s
+
+# --- Swagger disabled ---
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false
+
+# --- Management endpoints ---
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+# --- Logging ---
+logging:
+  level:
+    root: INFO
+    com.zzp.aiagent: INFO

@@ -17,8 +17,7 @@ public class MemorySanitizer {
     private static final Pattern FAKE_IMAGE_PLACEHOLDER = Pattern.compile(
             "\\[图片链接\\]|\\[image\\]|\\[图片\\d+\\]");
     private static final Pattern SYSTEM_CONTEXT_BLOCK = Pattern.compile(
-            "【用户从图库中选择了以下参考图片】[\\s\\S]*?(?=【用户原始需求】|$)",
-            Pattern.MULTILINE);
+            "【用户从图库中选择了以下参考图片】[\\s\\S]*?(?=【用户原始需求】|\\z)");
 
     public String sanitize(String text) {
         if (text == null || text.isBlank()) return text;

@@ -7,13 +7,13 @@ import com.zzp.aiagent.utils.PromptTemplate;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.ChatClientResponse;
-import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
-import org.springframework.ai.chat.memory.ChatMemory;
+import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.content.Media;
 import reactor.core.publisher.Flux;
 
 import java.util.Map;
+import java.util.List;
 
 /**
  * Lightweight Agent wrapper around Spring AI {@link ChatClient}.
@@ -56,7 +56,6 @@ public class Agent {
     public Agent(String name,
                  AgentConfig config,
                  ChatModel chatModel,
-                 ChatMemory chatMemory,
                  PromptTemplate promptTemplate,
                  Object... tools) {
         this.name = name;
@@ -70,7 +69,6 @@ public class Agent {
                 .defaultAdvisors(
                         new ContentGuardAdvisor(),
                         new AgentTraceAdvisor(config),
-                        MessageChatMemoryAdvisor.builder(chatMemory).build(),
                         new LoggingAdvisor(),
                         new ExceptionGuardAdvisor()
                 )
@@ -91,13 +89,18 @@ public class Agent {
      * @return structured result with state, content, and trace
      */
     public AgentResult run(String userText, Media userMedia,
-                           Map<String, Object> toolContext, String chatId) {
+                           Map<String, Object> toolContext, String chatId,
+                           List<Message> memoryMessages) {
         String turnId = turnIdFrom(toolContext);
         AgentContext.init(turnId, config);
         log.debug("[Agent] 开始执行 name={} chatId={} turnId={}", name, chatId, turnId);
 
         try {
-            String content = chatClient.prompt()
+            var request = chatClient.prompt();
+            if (memoryMessages != null && !memoryMessages.isEmpty()) {
+                request.messages(memoryMessages);
+            }
+            String content = request
                     .user(spec -> {
                         spec.text(userText != null ? userText : "");
                         if (userMedia != null) {
@@ -105,9 +108,7 @@ public class Agent {
                         }
                     })
                     .toolContext(toolContext != null ? toolContext : Map.of())
-                    .advisors(spec -> spec
-                            .param(ChatMemory.CONVERSATION_ID, chatId)
-                            .param("chatId", chatId))
+                    .advisors(spec -> spec.param("chatId", chatId))
                     .call()
                     .content();
 
@@ -145,13 +146,18 @@ public class Agent {
      * @return stream of {@link ChatClientResponse} (tool calls + text tokens)
      */
     public Flux<ChatClientResponse> streamRaw(String userText, Media userMedia,
-                                              Map<String, Object> toolContext, String chatId) {
+                                              Map<String, Object> toolContext, String chatId,
+                                              List<Message> memoryMessages) {
         String turnId = turnIdFrom(toolContext);
         AgentContext.init(turnId, config);
         log.debug("[Agent] 开始流式执行 name={} chatId={} turnId={}", name, chatId, turnId);
 
         final String capturedTurnId = turnId;
-        return chatClient.prompt()
+        var request = chatClient.prompt();
+        if (memoryMessages != null && !memoryMessages.isEmpty()) {
+            request.messages(memoryMessages);
+        }
+        return request
                 .user(spec -> {
                     spec.text(userText != null ? userText : "");
                     if (userMedia != null) {
@@ -159,9 +165,7 @@ public class Agent {
                     }
                 })
                 .toolContext(toolContext != null ? toolContext : Map.of())
-                .advisors(spec -> spec
-                        .param(ChatMemory.CONVERSATION_ID, chatId)
-                        .param("chatId", chatId))
+                .advisors(spec -> spec.param("chatId", chatId))
                 .stream()
                 .chatClientResponse()
                 .doOnComplete(() -> {

@@ -104,11 +104,11 @@ class PexelsSearchToolsTest {
 
             assertThat(output).contains("Pexels 搜索「test」");
             assertThat(output).contains("50 张图片");
-            assertThat(output).contains("[ID:100]");
+            assertThat(output).contains("[Pexels ID:100]");
             assertThat(output).contains("Sunset over mountains");
             assertThat(output).contains("#FF6600");
             assertThat(output).contains("© Test Photographer");
-            assertThat(output).contains("[ID:200]");
+            assertThat(output).contains("[Pexels ID:200]");
             assertThat(output).contains("Ocean waves");
             assertThat(output).contains("#0066FF");
         }

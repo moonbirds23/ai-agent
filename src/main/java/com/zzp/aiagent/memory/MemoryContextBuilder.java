@@ -3,10 +3,10 @@ package com.zzp.aiagent.memory;
 import com.zzp.aiagent.manager.RedisChatMemory;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.messages.Message;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 @Slf4j
@@ -16,49 +16,55 @@ public class MemoryContextBuilder {
 
     private final RedisChatMemory chatMemory;
     private final MemorySanitizer sanitizer;
+    private final MemoryClassifier classifier;
     private final int promptWindowMessages;
     private final int maxContextChars;
 
     public MemoryContextBuilder(RedisChatMemory chatMemory,
                                 MemorySanitizer sanitizer,
-                                @Value("${app.chat-memory.prompt-window-messages:8}") int promptWindowMessages,
-                                @Value("${app.chat-memory.max-context-chars:3000}") int maxContextChars) {
+                                MemoryClassifier classifier,
+                                ChatMemoryProperties properties) {
         this.chatMemory = chatMemory;
         this.sanitizer = sanitizer;
-        this.promptWindowMessages = promptWindowMessages;
-        this.maxContextChars = maxContextChars;
+        this.classifier = classifier;
+        this.promptWindowMessages = properties.promptWindowMessages();
+        this.maxContextChars = properties.maxContextChars();
     }
 
     public List<Message> build(String conversationId) {
-        List<Message> raw = chatMemory.get(conversationId, promptWindowMessages * 2);
+        List<Message> raw = chatMemory.get(conversationId, Math.max(promptWindowMessages * 3, 12));
         List<Message> clean = new ArrayList<>();
         int totalChars = 0;
 
-        for (Message msg : raw) {
+        for (int i = raw.size() - 1; i >= 0 && clean.size() < promptWindowMessages; i--) {
+            Message msg = raw.get(i);
+            if (msg instanceof org.springframework.ai.chat.messages.SystemMessage) continue;
             String text = msg.getText();
             if (text == null || text.isBlank()) continue;
-
-            if (text.startsWith("【用户从图库中选择了以下参考图片】")
-                    || text.startsWith("【系统参考上下文】")
-                    || text.startsWith("【rag")) {
-                continue;
-            }
 
             if (sanitizer.isPseudoToolCall(text) || sanitizer.hasFakeImages(text)) {
                 continue;
             }
+            if (msg instanceof org.springframework.ai.chat.messages.UserMessage
+                    && classifier.classifyUser(text)
+                    != com.zzp.aiagent.memory.model.MemoryEntryType.USER_INTENT) continue;
 
-            int charCount = text.length();
+            String sanitized = sanitizer.sanitize(text);
+            if (sanitized == null || sanitized.isBlank()) continue;
+            int charCount = sanitized.length();
             if (totalChars + charCount > maxContextChars) {
-                break;
+                continue;
             }
 
-            clean.add(msg);
+            clean.add(msg instanceof org.springframework.ai.chat.messages.UserMessage
+                    ? new org.springframework.ai.chat.messages.UserMessage(sanitized)
+                    : new org.springframework.ai.chat.messages.AssistantMessage(sanitized));
             totalChars += charCount;
         }
+        Collections.reverse(clean);
 
         log.debug("[MemoryContextBuilder] built {} clean messages ({} chars) for conv={}",
                 clean.size(), totalChars, conversationId);
-        return clean;
+        return List.copyOf(clean);
     }
 }

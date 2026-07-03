@@ -46,11 +46,6 @@ public final class TaskVerifier {
             return VerificationResult.needMoreInfo("需要补充图片、参考图或更具体的目标描述");
         }
 
-        VerificationResult result = verify(plan.taskType(), records);
-        if (result.deliverable()) {
-            return result;
-        }
-
         for (TaskStep step : plan.steps()) {
             if (!step.required() || step.toolName() == null) {
                 continue;
@@ -61,6 +56,7 @@ public final class TaskVerifier {
                 return VerificationResult.failed("任务未完成：缺少必要步骤「" + step.description() + "」的成功证据");
             }
         }
+        VerificationResult result = verify(plan.taskType(), records);
         return result;
     }
 

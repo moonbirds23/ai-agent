@@ -48,7 +48,7 @@ class RedisChatMemoryTest {
         when(redis.expire(anyString(), any(Duration.class))).thenReturn(true);
 
         historyRepo = mock(ChatHistoryRepository.class);
-        props = new ChatMemoryProperties(50, 7, 200);
+        props = new ChatMemoryProperties(50, 8, 3000, true, 7, 200);
 
         // ObjectProvider 默认返回 null（模拟无 Gallery/Vision/Storage 服务）
         ObjectProvider galleryProvider = mock(ObjectProvider.class);
@@ -62,7 +62,8 @@ class RedisChatMemoryTest {
 
         memory = new RedisChatMemory(redis, new ObjectMapper(),
                 historyRepo, props,
-                galleryProvider, visionProvider, storageProvider, executor);
+                galleryProvider, visionProvider, storageProvider,
+                new MemorySanitizer(), executor);
     }
 
     @SuppressWarnings("unchecked")
@@ -269,7 +270,8 @@ class RedisChatMemoryTest {
         when(storageProvider.getIfAvailable()).thenReturn(null);
 
         var m = new RedisChatMemory(redis, new ObjectMapper(), historyRepo, props,
-                galleryProvider, visionProvider, storageProvider, executor);
+                galleryProvider, visionProvider, storageProvider,
+                new MemorySanitizer(), executor);
 
         when(listOps.rightPushAll(anyString(), ArgumentMatchers.<String>anyCollection())).thenReturn(1L);
         when(listOps.size(anyString())).thenReturn(null);
@@ -382,7 +384,7 @@ class RedisChatMemoryTest {
     @Test
     @DisplayName("maxMessages=10 → get 最多取 10 条")
     void customMaxMessages_limitsGet() {
-        var customProps = new ChatMemoryProperties(10, 7, 200);
+        var customProps = new ChatMemoryProperties(10, 8, 3000, true, 7, 200);
         ObjectProvider galleryProvider = mock(ObjectProvider.class);
         when(galleryProvider.getIfAvailable()).thenReturn(null);
         ObjectProvider visionProvider = mock(ObjectProvider.class);
@@ -391,7 +393,8 @@ class RedisChatMemoryTest {
         when(storageProvider.getIfAvailable()).thenReturn(null);
 
         var customMemory = new RedisChatMemory(redis, new ObjectMapper(), historyRepo,
-                customProps, galleryProvider, visionProvider, storageProvider, executor);
+                customProps, galleryProvider, visionProvider, storageProvider,
+                new MemorySanitizer(), executor);
 
         String key = "chat:memory:chat-1";
         when(listOps.size(key)).thenReturn(100L);
@@ -431,7 +434,7 @@ class RedisChatMemoryTest {
     @Test
     @DisplayName("ChatMemoryProperties 默认值：maxMessages=50, ttlDays=7")
     void properties_defaults() {
-        var p = new ChatMemoryProperties(0, 0, 0);
+        var p = new ChatMemoryProperties(0, 0, 0, false, 0, 0);
         assertThat(p.maxMessages()).isEqualTo(50);
         assertThat(p.ttlDays()).isEqualTo(7);
         assertThat(p.maxConversationMessages()).isEqualTo(200);
@@ -440,7 +443,7 @@ class RedisChatMemoryTest {
     @Test
     @DisplayName("ChatMemoryProperties 负值 → 兜底为默认值")
     void properties_negative_fallsBack() {
-        var p = new ChatMemoryProperties(-1, -1, -1);
+        var p = new ChatMemoryProperties(-1, -1, -1, false, -1, -1);
         assertThat(p.maxMessages()).isEqualTo(50);
         assertThat(p.ttlDays()).isEqualTo(7);
         assertThat(p.maxConversationMessages()).isEqualTo(200);

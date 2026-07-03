@@ -1,11 +1,13 @@
 package com.zzp.aiagent.agent.task;
 
+import com.zzp.aiagent.model.dto.chat.ChatRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 
 @Slf4j
 @Component
@@ -17,57 +19,83 @@ public class TaskPlanRepair {
         this.validator = validator;
     }
 
-    public TaskPlan repair(TaskPlan plan, String userText) {
-        if (plan == null) return null;
+    public TaskPlan repair(TaskPlan plan, ChatRequest request) {
+        if (plan == null) {
+            return null;
+        }
 
-        PlanValidationResult result = validator.validate(plan);
-        if (result.valid()) return plan;
+        PlanValidationResult validation = validator.validate(plan, request);
+        if (validation.valid()) {
+            return plan;
+        }
 
-        log.info("[PlanRepair] Attempting repair for plan type={} errors={}", plan.taskType(), result.errors());
+        log.info("[PlanRepair] Attempting repair for plan type={} errors={}",
+                plan.taskType(), validation.errors());
+
+        String text = request != null && request.message() != null
+                ? request.message().toLowerCase(Locale.ROOT) : "";
+        boolean asksGeneration = containsAny(text,
+                "生成", "画一张", "请画", "绘制", "做一张", "出一张", "生图",
+                "generate", "draw", "create an image");
+        boolean asksGallerySearch = containsAny(text,
+                "图库", "搜索图库", "图库里", "从图库");
+        boolean asksSearch = asksGallerySearch || containsAny(text,
+                "搜索图片", "找图片", "找几张", "搜索参考图", "网络图片", "pexels",
+                "search images", "find images", "reference images");
 
         List<TaskStep> steps = new ArrayList<>(plan.steps());
-        String lower = userText != null ? userText.toLowerCase(Locale.ROOT) : "";
 
-        if (containsAny(lower, "图库", "搜索图库", "找一下图库", "参考图", "收藏")
-                && steps.stream().noneMatch(s -> "searchGallery".equals(s.toolName()))) {
-            steps.add(0, TaskStep.of("search_gallery", "搜索本地图库", true, "searchGallery"));
-            log.info("[PlanRepair] Added missing searchGallery step");
+        if (asksGeneration && !asksSearch) {
+            steps.removeIf(step -> TaskPlanValidator.isSearchTool(step.toolName()));
         }
 
-        if (containsAny(lower, "生成", "画", "绘制", "做一张", "出一张", "海报", "壁纸", "生图")
-                && steps.stream().noneMatch(s -> "generateImage".equals(s.toolName()))) {
-            TaskStep genStep = TaskStep.of("generate_image", "生成图片", true, "generateImage");
-            if (steps.stream().anyMatch(s -> "searchGallery".equals(s.toolName()))) {
-                genStep = new TaskStep("generate_image", "生成图片", true, "generateImage",
-                        List.of("search_gallery"), java.util.Map.of(), StepStatus.PENDING);
-            }
-            steps.add(steps.size(), genStep);
-            log.info("[PlanRepair] Added missing generateImage step");
+        if (asksGallerySearch && steps.stream()
+                .noneMatch(step -> "searchGallery".equals(step.toolName()))) {
+            steps.add(0, new TaskStep(
+                    "search_gallery", "搜索本地图库", true, "searchGallery",
+                    List.of(), Map.of("query", request.message(), "limit", 5),
+                    StepStatus.PENDING));
         }
 
-        boolean hasSearch = steps.stream().anyMatch(s -> "searchGallery".equals(s.toolName()));
-        boolean hasGen = steps.stream().anyMatch(s -> "generateImage".equals(s.toolName()));
-        if (hasSearch && hasGen) {
-            steps = steps.stream().map(s -> {
-                if ("generateImage".equals(s.toolName())
-                        && (s.dependsOn() == null || s.dependsOn().isEmpty())) {
-                    return new TaskStep(s.code(), s.description(), s.required(), s.toolName(),
-                            List.of("search_gallery"), s.input(), StepStatus.PENDING);
-                }
-                return s;
-            }).toList();
+        if (asksGeneration && steps.stream()
+                .noneMatch(step -> "generateImage".equals(step.toolName()))) {
+            steps.add(new TaskStep(
+                    "generate_image", "生成图片", true, "generateImage",
+                    List.of(), Map.of("promptIntent", request.message()),
+                    StepStatus.PENDING));
         }
 
-        TaskType taskType = plan.taskType();
-        if (hasSearch && hasGen && taskType == TaskType.IMAGE_GENERATION) {
-            taskType = TaskType.CREATIVE_WORKFLOW;
-        }
+        String searchStepCode = asksSearch
+                ? steps.stream()
+                .filter(step -> TaskPlanValidator.isSearchTool(step.toolName()))
+                .map(TaskStep::code)
+                .findFirst()
+                .orElse(null)
+                : null;
 
-        TaskPlan repaired = new TaskPlan(plan.turnId(), taskType, plan.userGoal(),
-                List.copyOf(steps), plan.requiresImage(), hasGen,
-                plan.requiresExternalSearch(), plan.slots());
+        boolean explicitWorkflow = asksGeneration && asksSearch;
+        List<TaskStep> repairedSteps = steps.stream()
+                .map(step -> repairStep(step, asksGeneration, explicitWorkflow, searchStepCode))
+                .toList();
 
-        PlanValidationResult recheck = validator.validate(repaired);
+        boolean hasGeneration = repairedSteps.stream()
+                .anyMatch(step -> "generateImage".equals(step.toolName()));
+        boolean hasSearch = repairedSteps.stream()
+                .anyMatch(step -> TaskPlanValidator.isSearchTool(step.toolName()));
+        TaskType taskType = hasGeneration && hasSearch
+                ? TaskType.CREATIVE_WORKFLOW
+                : hasGeneration ? TaskType.IMAGE_GENERATION : plan.taskType();
+
+        TaskPlan repaired = new TaskPlan(
+                plan.turnId(), taskType, plan.userGoal(), List.copyOf(repairedSteps),
+                plan.requiresImage(), hasGeneration,
+                repairedSteps.stream().anyMatch(step ->
+                        "pexelsSearchPhotos".equals(step.toolName())
+                                || "webSearch".equals(step.toolName())
+                                || "imageSearch".equals(step.toolName())),
+                plan.slots());
+
+        PlanValidationResult recheck = validator.validate(repaired, request);
         if (recheck.valid()) {
             log.info("[PlanRepair] Repair successful");
             return repaired;
@@ -77,10 +105,35 @@ public class TaskPlanRepair {
         return null;
     }
 
+    private static TaskStep repairStep(TaskStep step, boolean asksGeneration,
+                                       boolean explicitWorkflow, String searchStepCode) {
+        if (explicitWorkflow && TaskPlanValidator.isSearchTool(step.toolName())) {
+            return new TaskStep(
+                    step.code(), step.description(), true, step.toolName(),
+                    step.dependsOn() != null ? step.dependsOn() : List.of(),
+                    step.input() != null ? step.input() : Map.of(),
+                    StepStatus.PENDING);
+        }
+        if (!"generateImage".equals(step.toolName())) {
+            return step;
+        }
+        List<String> dependencies = searchStepCode != null
+                ? List.of(searchStepCode) : List.of();
+        return new TaskStep(
+                step.code(), step.description(), asksGeneration || step.required(),
+                step.toolName(), dependencies,
+                step.input() != null ? step.input() : Map.of(),
+                StepStatus.PENDING);
+    }
+
     private static boolean containsAny(String text, String... needles) {
-        if (text == null || text.isBlank()) return false;
+        if (text == null || text.isBlank()) {
+            return false;
+        }
         for (String needle : needles) {
-            if (text.contains(needle.toLowerCase(Locale.ROOT))) return true;
+            if (text.contains(needle.toLowerCase(Locale.ROOT))) {
+                return true;
+            }
         }
         return false;
     }

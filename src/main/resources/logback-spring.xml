@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+    <!-- ============================================================ -->
+    <!-- CONSOLE appender: always active                               -->
+    <!-- ============================================================ -->
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread] %logger{36} : %replace(%msg){'\n', '\\n'}%n</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+    </appender>
+
+    <!-- ============================================================ -->
+    <!-- FILE appender: RollingFileAppender, prod profile only        -->
+    <!-- ============================================================ -->
+    <springProfile name="prod">
+        <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+            <file>logs/ai-agent.log</file>
+            <encoder>
+                <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread] %logger{36} : %replace(%msg){'\n', '\\n'}%n</pattern>
+                <charset>UTF-8</charset>
+            </encoder>
+            <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+                <!-- daily rollover -->
+                <fileNamePattern>logs/ai-agent.%d{yyyy-MM-dd}.log</fileNamePattern>
+                <!-- keep 30 days -->
+                <maxHistory>30</maxHistory>
+                <!-- max total 3GB -->
+                <totalSizeCap>3GB</totalSizeCap>
+            </rollingPolicy>
+        </appender>
+    </springProfile>
+
+    <!-- ============================================================ -->
+    <!-- Package-level logging                                        -->
+    <!-- ============================================================ -->
+
+    <!-- com.zzp.aiagent: DEBUG in dev, INFO otherwise -->
+    <springProfile name="dev">
+        <logger name="com.zzp.aiagent" level="DEBUG"/>
+    </springProfile>
+    <springProfile name="!dev">
+        <logger name="com.zzp.aiagent" level="INFO"/>
+    </springProfile>
+
+    <logger name="org.springframework" level="WARN"/>
+    <logger name="org.springframework.ai" level="INFO"/>
+    <logger name="io.github.resilience4j" level="INFO"/>
+    <logger name="org.flywaydb" level="INFO"/>
+
+    <!-- ============================================================ -->
+    <!-- Root                                                         -->
+    <!-- ============================================================ -->
+    <root level="INFO">
+        <appender-ref ref="CONSOLE"/>
+        <springProfile name="prod">
+            <appender-ref ref="FILE"/>
+        </springProfile>
+    </root>
+</configuration>

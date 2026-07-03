@@ -274,17 +274,27 @@ public class GalleryAgentTools {
             String dimensions,
             ToolContext toolContext) {
 
-        progressContext.start(toolContext, "generateImage", "正在生成图片" + formatGenerationMeta(style, dimensions));
+        String effectiveStyle = currentContextValue(toolContext, "generationStyle", style);
+        String effectiveDimensions = currentContextValue(
+                toolContext, "generationDimensions", "1024x1024");
+        progressContext.start(toolContext, "generateImage",
+                "正在生成图片" + formatGenerationMeta(effectiveStyle, effectiveDimensions));
         String turnId = currentTurnId(toolContext);
-        Map<String, Object> input = Map.of("prompt", prompt, "style", style != null ? style : "", "dimensions", dimensions != null ? dimensions : "");
+        Map<String, Object> input = Map.of(
+                "prompt", prompt,
+                "style", effectiveStyle != null ? effectiveStyle : "",
+                "dimensions", effectiveDimensions);
         taskLedger.beforeCall(turnId, "generateImage", input);
         try {
-            ImageGenerationResult result = imageGenerationService.generate(prompt, style, dimensions);
+            ImageGenerationResult result = imageGenerationService.generate(
+                    prompt,
+                    effectiveStyle != null && !effectiveStyle.isBlank() ? effectiveStyle : null,
+                    effectiveDimensions);
 
             boolean autoSave = readSaveGeneratedToGallery(toolContext);
             boolean savedToGallery = false;
             if (autoSave) {
-                savedToGallery = saveToGallery(prompt, style, result);
+                savedToGallery = saveToGallery(prompt, effectiveStyle, result);
                 if (savedToGallery) {
                     log.info("[AgentTools] 图片生成成功，已自动入库");
                 } else {
@@ -299,8 +309,8 @@ public class GalleryAgentTools {
                     result.imageBase64(),
                     prompt,
                     result.revisedPrompt(),
-                    style,
-                    dimensions,
+                    effectiveStyle,
+                    effectiveDimensions,
                     result.metadata()
             ));
             progressContext.done(toolContext, "generateImage", "图片生成完成");
@@ -468,6 +478,15 @@ public class GalleryAgentTools {
         }
         Object flag = toolContext.getContext().get("saveGeneratedToGallery");
         return flag instanceof Boolean b && b;
+    }
+
+    private static String currentContextValue(ToolContext toolContext, String key,
+                                              String fallback) {
+        if (toolContext == null || toolContext.getContext() == null) {
+            return fallback;
+        }
+        Object value = toolContext.getContext().get(key);
+        return value instanceof String text ? text : fallback;
     }
 
     private boolean saveToGallery(String prompt, String style, ImageGenerationResult result) {

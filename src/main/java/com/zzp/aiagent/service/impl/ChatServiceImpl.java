@@ -1,12 +1,17 @@
 package com.zzp.aiagent.service.impl;
 
-import com.zzp.aiagent.agent.Agent;
-import com.zzp.aiagent.agent.AgentConfig;
+import com.zzp.aiagent.agent.AgentResult;
+import com.zzp.aiagent.agent.AgentState;
+import com.zzp.aiagent.agent.WorkflowEngine;
+import com.zzp.aiagent.agent.executor.AgentExecutor;
+import com.zzp.aiagent.agent.executor.AgentInput;
+import com.zzp.aiagent.agent.prompt.PromptBudgetManager;
 import com.zzp.aiagent.agent.task.RecoveryPolicy;
 import com.zzp.aiagent.agent.task.ResponseComposer;
+import com.zzp.aiagent.agent.task.StepStatus;
 import com.zzp.aiagent.agent.task.TaskLedger;
 import com.zzp.aiagent.agent.task.TaskPlan;
-import com.zzp.aiagent.agent.task.TaskPlanner;
+import com.zzp.aiagent.agent.task.TaskPromptBuilder;
 import com.zzp.aiagent.agent.task.TaskType;
 import com.zzp.aiagent.agent.task.ToolExecutionRecord;
 import com.zzp.aiagent.agent.task.VerificationResult;
@@ -23,22 +28,18 @@ import com.zzp.aiagent.model.enums.StorageLocation;
 import com.zzp.aiagent.model.vo.ChatResponseVO;
 import com.zzp.aiagent.model.vo.ImageGeneratedEventVO;
 import com.zzp.aiagent.model.vo.StreamEventVO;
+import com.zzp.aiagent.memory.MemoryContextBuilder;
+import com.zzp.aiagent.memory.MemoryWriter;
 import com.zzp.aiagent.service.ChatMediaService;
 import com.zzp.aiagent.service.ChatService;
 import com.zzp.aiagent.service.ConversationLimitService;
 import com.zzp.aiagent.service.GalleryService;
 import com.zzp.aiagent.service.PictureAiProfileService;
 import com.zzp.aiagent.tool.CurrentImageContext;
-import com.zzp.aiagent.tool.GalleryAgentTools;
-import com.zzp.aiagent.tool.PexelsSearchTools;
 import com.zzp.aiagent.tool.ToolProgressContext;
-import com.zzp.aiagent.tool.WebSearchTools;
-import com.zzp.aiagent.utils.PromptTemplate;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClientResponse;
-import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.messages.AssistantMessage;
-import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.content.Media;
 import org.springframework.context.annotation.Profile;
@@ -61,7 +62,7 @@ import java.util.regex.Pattern;
  * Responsibilities:
  * <ul>
  *   <li>Pre-processing: image auto-save, media construction, reference context.</li>
- *   <li>Delegate execution to {@link Agent} (which owns the {@code ChatClient}).</li>
+ *   <li>Delegate execution to the selected AgentExecutor.</li>
  *   <li>Post-processing: hallucination guard, VO construction.</li>
  * </ul>
  * Advisor chain (managed by Agent):
@@ -77,7 +78,6 @@ public class ChatServiceImpl implements ChatService {
     private static final Pattern PSEUDO_SEARCH_GALLERY =
             Pattern.compile("^\\s*searchGallery\\([\"“](.*?)[\"”]\\)\\s*$");
 
-    private final Agent agent;
     private final GalleryService galleryService;
     private final PictureAiProfileService pictureAiProfileService;
     private final ChatMediaService chatMediaService;
@@ -85,22 +85,26 @@ public class ChatServiceImpl implements ChatService {
     private final CurrentImageContext currentImageContext;
     private final ToolProgressContext toolProgressContext;
     private final TaskLedger taskLedger;
-    private final TaskPlanner taskPlanner;
     private final RecoveryPolicy recoveryPolicy;
+    private final WorkflowEngine workflowEngine;
+    private final MemoryContextBuilder memoryContextBuilder;
+    private final MemoryWriter memoryWriter;
+    private final TaskPromptBuilder taskPromptBuilder;
+    private final PromptBudgetManager promptBudgetManager;
 
-    public ChatServiceImpl(ChatModel openAiChatModel, ChatMemory chatMemory, PromptTemplate promptTemplate,
-                           GalleryAgentTools galleryAgentTools,
-                           WebSearchTools webSearchTools,
-                           PexelsSearchTools pexelsSearchTools,
-                           GalleryService galleryService,
+    public ChatServiceImpl(GalleryService galleryService,
                            PictureAiProfileService pictureAiProfileService,
                            ChatMediaService chatMediaService,
                            ConversationLimitService conversationLimitService,
                            CurrentImageContext currentImageContext,
                            ToolProgressContext toolProgressContext,
                            TaskLedger taskLedger,
-                           TaskPlanner taskPlanner,
-                           RecoveryPolicy recoveryPolicy) {
+                           RecoveryPolicy recoveryPolicy,
+                           WorkflowEngine workflowEngine,
+                           MemoryContextBuilder memoryContextBuilder,
+                           MemoryWriter memoryWriter,
+                           TaskPromptBuilder taskPromptBuilder,
+                           PromptBudgetManager promptBudgetManager) {
         this.galleryService = galleryService;
         this.pictureAiProfileService = pictureAiProfileService;
         this.chatMediaService = chatMediaService;
@@ -108,17 +112,12 @@ public class ChatServiceImpl implements ChatService {
         this.currentImageContext = currentImageContext;
         this.toolProgressContext = toolProgressContext;
         this.taskLedger = taskLedger;
-        this.taskPlanner = taskPlanner;
         this.recoveryPolicy = recoveryPolicy;
-
-        this.agent = new Agent("cloud-gallery-agent",
-                AgentConfig.of("cloud-gallery-agent"),
-                openAiChatModel,
-                chatMemory,
-                promptTemplate,
-                galleryAgentTools,
-                webSearchTools,
-                pexelsSearchTools);
+        this.workflowEngine = workflowEngine;
+        this.memoryContextBuilder = memoryContextBuilder;
+        this.memoryWriter = memoryWriter;
+        this.taskPromptBuilder = taskPromptBuilder;
+        this.promptBudgetManager = promptBudgetManager;
     }
 
     // ── 非流式入口 ──────────────────────────────────────────────────
@@ -127,32 +126,33 @@ public class ChatServiceImpl implements ChatService {
     public ChatResponseVO chat(ChatRequest request, String chatId) {
         conversationLimitService.checkLimit(chatId);
         GalleryPicture saved = autoSaveToCacheGallery(request);
-        String turnId = newTurnId(chatId);
-        TaskPlan plan = taskPlanner.plan(request, turnId);
-        taskLedger.startPlan(plan);
+        TaskPlan plan = workflowEngine.plan(request, chatId);
+        String turnId = plan.turnId();
         currentImageContext.bind(turnId, extractImageBase64(request));
 
         try {
-            String userText = buildUserText(request);
+            String rawUserText = request.message() != null ? request.message() : "";
+            String executionContext = buildExecutionContext(request, plan);
             Media media = chatMediaService.createMedia(saved, request.imageBase64(), request.imageUrl());
             Map<String, Object> ctx = toolContext(chatId, turnId, request);
+            ctx.put("imageBase64", extractImageBase64(request) != null ? extractImageBase64(request) : "");
+            AgentInput input = AgentInput.of(rawUserText, executionContext,
+                    memoryContextBuilder.build(chatId), media, ctx, chatId, plan);
 
-            String response = agent.run(userText, media, ctx, chatId).content();
-
-            ToolProgressContext.ToolTraceSnapshot trace = toolProgressContext.snapshot(turnId);
-            if (trace.imageGenerated()) {
-                ImageGeneratedEventVO imageData = toolProgressContext.getGeneratedImage(turnId);
-                if (imageData != null) {
-                    log.info("[Chat] 非流式返回生图结果 chatId={}", chatId);
-                    return ChatResponseVO.imageGenerated(chatId, imageData.imageUrl(),
-                            imageData.imageBase64(),
-                            response != null && !response.isBlank() ? response : "图片已生成");
-                }
-            }
-
+            AgentResult result = workflowEngine.execute(input, plan);
+            String response = result.state() == AgentState.ERROR ? result.content() : result.content();
             String effectiveResponse = executePlannedFallbackIfNeeded(plan, turnId, response);
             String safeResponse = ResponseComposer.composeVerified(effectiveResponse, taskLedger, turnId, recoveryPolicy);
-            return ChatResponseVO.textOnly(chatId, safeResponse);
+            VerificationResult verification = taskLedger.getVerification(turnId);
+            writeTrustedMemory(chatId, rawUserText, safeResponse, verification,
+                    request.referencePictureIds());
+
+            ImageGeneratedEventVO imageData = toolProgressContext.getGeneratedImage(turnId);
+            if (verification != null && verification.deliverable() && imageData != null) {
+                return ChatResponseVO.imageGenerated(chatId, imageData.imageUrl(),
+                        imageData.imageBase64(), safeResponse);
+            }
+            return responseForVerification(chatId, safeResponse, verification);
         } finally {
             toolProgressContext.clear(turnId);
             taskLedger.clear(turnId);
@@ -166,20 +166,26 @@ public class ChatServiceImpl implements ChatService {
     public Flux<StreamEventVO> chatStream(ChatRequest request, String chatId) {
         conversationLimitService.checkLimit(chatId);
         GalleryPicture saved = autoSaveToCacheGallery(request);
-        String turnId = newTurnId(chatId);
-        TaskPlan plan = taskPlanner.plan(request, turnId);
-        taskLedger.startPlan(plan);
+        TaskPlan plan = workflowEngine.plan(request, chatId);
+        String turnId = plan.turnId();
         currentImageContext.bind(turnId, extractImageBase64(request));
 
-        String userText = buildUserText(request);
+        String rawUserText = request.message() != null ? request.message() : "";
+        String executionContext = buildExecutionContext(request, plan);
         Media media = chatMediaService.createMedia(saved, request.imageBase64(), request.imageUrl());
         Map<String, Object> ctx = toolContext(chatId, turnId, request);
+        ctx.put("imageBase64", extractImageBase64(request) != null ? extractImageBase64(request) : "");
+        AgentInput input = AgentInput.of(rawUserText, executionContext,
+                memoryContextBuilder.build(chatId), media, ctx, chatId, plan);
+        AgentExecutor executor = workflowEngine.selectExecutor(plan);
 
         StringBuilder accumulator = new StringBuilder();
         Sinks.Many<StreamEventVO> progressSink = Sinks.many().multicast().onBackpressureBuffer();
         toolProgressContext.bind(turnId, chatId, progressSink);
 
-        Flux<StreamEventVO> eventFlux = agent.streamRaw(userText, media, ctx, chatId)
+        Flux<StreamEventVO> eventFlux = workflowEngine.isManualExecution(plan)
+                ? manualExecutionEvents(executor, input, accumulator, chatId, turnId, plan)
+                : executor.stream(input)
                 .concatMap(clientResponse -> {
                     Flux<StreamEventVO> events = Flux.empty();
                     ChatResponse cr = clientResponse.chatResponse();
@@ -212,9 +218,21 @@ public class ChatServiceImpl implements ChatService {
             String fullText = accumulator.toString();
             String effectiveText = executePlannedFallbackIfNeeded(plan, turnId, fullText);
             String safeText = ResponseComposer.composeVerified(effectiveText, taskLedger, turnId, recoveryPolicy);
-            return Flux.just(
-                    StreamEventVO.taskVerified(chatId, taskLedger.snapshot(turnId)),
-                    StreamEventVO.done(chatId, ChatResponseVO.textOnly(chatId, safeText)));
+            VerificationResult verification = taskLedger.getVerification(turnId);
+            writeTrustedMemory(chatId, rawUserText, safeText, verification,
+                    request.referencePictureIds());
+            var snapshot = taskLedger.snapshot(turnId, recoveryPolicy);
+            List<StreamEventVO> events = new java.util.ArrayList<>();
+            events.add(StreamEventVO.taskVerified(chatId, snapshot));
+            if (snapshot.recoveryAction() != null
+                    && snapshot.recoveryAction().type()
+                    != com.zzp.aiagent.agent.task.RecoveryActionType.NONE) {
+                events.add(StreamEventVO.recoverySuggested(
+                        chatId, snapshot.recoveryAction().message()));
+            }
+            events.add(StreamEventVO.done(
+                    chatId, responseForVerification(chatId, safeText, verification)));
+            return Flux.fromIterable(events);
         });
 
         Flux<StreamEventVO> mergedEvents = Flux.merge(
@@ -224,7 +242,7 @@ public class ChatServiceImpl implements ChatService {
 
         return Flux.concat(
                 Flux.just(StreamEventVO.chatId(chatId)),
-                Flux.just(StreamEventVO.taskPlanned(chatId, taskLedger.snapshot(turnId))),
+                Flux.just(StreamEventVO.taskPlanned(chatId, taskLedger.snapshot(turnId, recoveryPolicy))),
                 mergedEvents,
                 doneEvent
         ).onErrorResume(e -> {
@@ -239,7 +257,7 @@ public class ChatServiceImpl implements ChatService {
             taskLedger.markVerifying(turnId);
             taskLedger.completeVerification(turnId, VerificationResult.failed(errorMsg));
             return Flux.just(
-                    StreamEventVO.taskVerified(chatId, taskLedger.snapshot(turnId)),
+                    StreamEventVO.taskVerified(chatId, taskLedger.snapshot(turnId, recoveryPolicy)),
                     StreamEventVO.error(errorMsg));
         }).doFinally(signal -> {
             toolProgressContext.clear(turnId);
@@ -248,18 +266,102 @@ public class ChatServiceImpl implements ChatService {
         });
     }
 
+    private Flux<StreamEventVO> manualExecutionEvents(AgentExecutor executor, AgentInput input,
+                                                       StringBuilder accumulator, String chatId,
+                                                       String turnId, TaskPlan plan) {
+        return Flux.defer(() -> {
+            AgentResult result = executor.execute(input);
+            String content = result.content() != null ? result.content() : "";
+            accumulator.append(content);
+
+            List<StreamEventVO> events = new java.util.ArrayList<>();
+            for (var step : plan.steps()) {
+                if (step.toolName() == null) continue;
+                StepStatus status = taskLedger.getStepStatus(turnId, step.code());
+                events.add(StreamEventVO.taskStepStarted(chatId, step.code(), step.description()));
+                if (status == StepStatus.SUCCESS) {
+                    events.add(StreamEventVO.taskStepCompleted(chatId, step.code(), step.description()));
+                } else if (status == StepStatus.FAILED) {
+                    events.add(StreamEventVO.taskStepFailed(chatId, step.code(), "步骤执行失败"));
+                }
+            }
+            if (!content.isBlank()) {
+                events.add(StreamEventVO.token(content));
+            }
+            return Flux.fromIterable(events);
+        });
+    }
+
+    private String buildExecutionContext(ChatRequest request, TaskPlan plan) {
+        String taskPrompt = promptBudgetManager.trimTask(taskPromptBuilder.build(plan));
+        String referenceContext = promptBudgetManager.trimRag(
+                buildSelectedReferenceContext(request.referencePictureIds()));
+        if (taskPrompt.isBlank()) return referenceContext;
+        if (referenceContext.isBlank()) return taskPrompt;
+        return taskPrompt + "\n\n" + referenceContext;
+    }
+
+    private void writeTrustedMemory(String chatId, String rawUserText, String safeResponse,
+                                    VerificationResult verification, List<Long> referenceIds) {
+        memoryWriter.writeVerifiedTurn(chatId, rawUserText, safeResponse, verification);
+        if (verification != null && verification.deliverable()
+                && referenceIds != null && !referenceIds.isEmpty()) {
+            memoryWriter.writeResourceSummary(chatId,
+                    "本轮使用图库图片 ID：" + referenceIds);
+        }
+    }
+
+    private static ChatResponseVO responseForVerification(String chatId, String text,
+                                                          VerificationResult verification) {
+        if (verification == null) return ChatResponseVO.textOnly(chatId, text);
+        return switch (verification.status()) {
+            case PARTIAL_SUCCESS -> ChatResponseVO.partialSuccess(chatId, text);
+            case NEED_MORE_INFO -> ChatResponseVO.needMoreInfo(chatId, text);
+            default -> ChatResponseVO.textOnly(chatId, text);
+        };
+    }
+
     private static Map<String, Object> toolContext(String chatId, String turnId, ChatRequest request) {
         Map<String, Object> context = new LinkedHashMap<>();
         context.put(CurrentImageContext.CHAT_ID_CONTEXT_KEY, chatId);
         context.put(CurrentImageContext.TURN_ID_CONTEXT_KEY, turnId);
+        context.put("generationDimensions", resolveGenerationDimensions(request.message()));
+        context.put("generationStyle", resolveGenerationStyle(request.message()));
         if (request.saveGeneratedToGallery() != null) {
             context.put("saveGeneratedToGallery", request.saveGeneratedToGallery());
         }
         return context;
     }
 
-    private static String newTurnId(String chatId) {
-        return chatId + ":" + UUID.randomUUID();
+    private static String resolveGenerationDimensions(String message) {
+        String text = message != null ? message.toLowerCase() : "";
+        if (containsAny(text, "竖版", "竖向", "portrait", "9:16")) {
+            return "768x1344";
+        }
+        if (containsAny(text, "横版", "横向", "landscape", "16:9")) {
+            return "1344x768";
+        }
+        return "1024x1024";
+    }
+
+    private static String resolveGenerationStyle(String message) {
+        String text = message != null ? message.toLowerCase() : "";
+        if (containsAny(text, "极简", "minimalist", "minimal")) return "minimalist";
+        if (containsAny(text, "写实", "realistic", "photorealistic")) return "realistic";
+        if (containsAny(text, "赛博朋克", "霓虹", "cyberpunk", "neon")) return "cyberpunk";
+        if (containsAny(text, "插画", "illustration")) return "illustration";
+        if (containsAny(text, "二次元", "动漫", "anime")) return "anime";
+        if (containsAny(text, "水彩", "watercolor")) return "watercolor";
+        if (containsAny(text, "水墨", "ink wash")) return "ink wash";
+        if (containsAny(text, "油画", "oil painting")) return "oil painting";
+        return "";
+    }
+
+    private static boolean containsAny(String text, String... values) {
+        for (String value : values) {
+            if (text.contains(value)) return true;
+        }
+        return false;
     }
 
     /**
@@ -331,18 +433,6 @@ public class ChatServiceImpl implements ChatService {
     }
 
     // ── 公共工具 ────────────────────────────────────────────────────
-
-    /**
-     * Build the full user text including selected-reference context.
-     */
-    private String buildUserText(ChatRequest request) {
-        String text = request.message() != null ? request.message() : "";
-        String referenceContext = buildSelectedReferenceContext(request.referencePictureIds());
-        if (!referenceContext.isBlank()) {
-            text = referenceContext + "\n【用户原始需求】\n" + text;
-        }
-        return text;
-    }
 
     private String buildSelectedReferenceContext(List<Long> referenceIds) {
         if (referenceIds == null || referenceIds.isEmpty()) {

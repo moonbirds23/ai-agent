@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zzp.aiagent.model.entity.GalleryPicture;
 import com.zzp.aiagent.memory.ChatMemoryProperties;
+import com.zzp.aiagent.memory.MemorySanitizer;
 import com.zzp.aiagent.model.dto.image.VisionAnalysisResult;
 import com.zzp.aiagent.model.dto.memory.ChatMessageRecord;
 import com.zzp.aiagent.model.dto.memory.ImageRef;
@@ -62,6 +63,7 @@ public class RedisChatMemory implements ChatMemory {
     private final ObjectProvider<VisionAnalysisService> visionServiceProvider;
     private final ObjectProvider<ObjectStorageService> storageServiceProvider;
     private final Executor executor;
+    private final MemorySanitizer memorySanitizer;
 
     public RedisChatMemory(StringRedisTemplate redis,
                            ObjectMapper mapper,
@@ -70,6 +72,7 @@ public class RedisChatMemory implements ChatMemory {
                            ObjectProvider<GalleryService> galleryServiceProvider,
                            ObjectProvider<VisionAnalysisService> visionServiceProvider,
                            ObjectProvider<ObjectStorageService> storageServiceProvider,
+                           MemorySanitizer memorySanitizer,
                            @Qualifier("taskExecutor") Executor executor) {
         this.redis = redis;
         this.mapper = mapper;
@@ -79,6 +82,7 @@ public class RedisChatMemory implements ChatMemory {
         this.galleryServiceProvider = galleryServiceProvider;
         this.visionServiceProvider = visionServiceProvider;
         this.storageServiceProvider = storageServiceProvider;
+        this.memorySanitizer = memorySanitizer;
         this.executor = executor;
     }
 
@@ -123,6 +127,8 @@ public class RedisChatMemory implements ChatMemory {
 
         // 1. 处理图片引用 + 序列化
         List<MessageRecord> records = messages.stream()
+                .filter(Objects::nonNull)
+                .filter(message -> !memorySanitizer.isPseudoToolCall(message.getText()))
                 .map(this::toRecord)
                 .filter(Objects::nonNull)
                 .toList();
@@ -216,6 +222,10 @@ public class RedisChatMemory implements ChatMemory {
     // ── 序列化: Message → MessageRecord ────────────────────
 
     private MessageRecord toRecord(Message msg) {
+        String sanitizedText = memorySanitizer.sanitize(msg.getText());
+        if (sanitizedText == null || sanitizedText.isBlank()) {
+            return null;
+        }
         List<ImageRef> imageRefs = null;
 
         if (msg instanceof UserMessage um && um.getMedia() != null && !um.getMedia().isEmpty()) {
@@ -231,7 +241,7 @@ public class RedisChatMemory implements ChatMemory {
             }
         }
 
-        return new MessageRecord(msg.getMessageType().name(), msg.getText(), imageRefs);
+        return new MessageRecord(msg.getMessageType().name(), sanitizedText, imageRefs);
     }
 
     private ImageRef resolveImageRef(Media media) {

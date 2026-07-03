@@ -44,8 +44,20 @@ spring:
     locations: classpath:db/migration
   application:
     name: aiagent
+  lifecycle:
+    timeout-per-shutdown-phase: 30s
+  mvc:
+    throw-exception-if-no-handler-found: true
+  web:
+    resources:
+      add-mappings: false
 
 app:
+  prompt:
+    max-system-chars: 1500
+    max-task-chars: 1200
+    max-memory-chars: 2500
+    max-rag-chars: 2500
   rag:
     enabled: true
     top-k: 5
@@ -57,6 +69,9 @@ app:
     metadata-weight: 10.0
   chat-memory:
     max-messages: 50
+    prompt-window-messages: 8
+    max-context-chars: 3000
+    enable-semantic-summary: true
     ttl-days: 7
     max-conversation-messages: 200
   gallery:
@@ -85,7 +100,9 @@ app:
     read-timeout-seconds: 30
     search-max-results: 5
     max-download-count: 3
+  api-key: ${APP_API_KEY:}
   agent:
+    execution-mode: hybrid
     max-tool-calls-per-turn: 8
     max-generation-calls-per-turn: 1
     max-download-calls-per-turn: 5
@@ -131,6 +148,20 @@ server:
   port: 8231
   servlet:
     context-path: /api
+  shutdown: graceful
+
+# management 健康检查 + 就绪探针
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: when-authorized
+
 # springdoc-openapi
 springdoc:
   swagger-ui:

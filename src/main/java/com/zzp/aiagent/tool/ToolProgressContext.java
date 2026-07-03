@@ -97,6 +97,33 @@ public class ToolProgressContext {
         return turnId != null ? generatedImages.get(turnId) : null;
     }
 
+    public void recordGeneratedImage(String turnId, ImageGeneratedEventVO data) {
+        if (turnId == null || turnId.isBlank() || data == null) {
+            return;
+        }
+        generatedImages.put(turnId, data);
+        ToolTrace trace = traces.computeIfAbsent(turnId, ignored -> new ToolTrace());
+        trace.generateImageCalled = true;
+        trace.imageGenerated = true;
+        Binding binding = bindings.get(turnId);
+        if (binding != null) {
+            binding.sink().tryEmitNext(StreamEventVO.imageGenerated(binding.chatId(), data));
+        }
+    }
+
+    public void recordImageCandidates(String turnId, ImageCandidatesEventVO data) {
+        if (turnId == null || turnId.isBlank() || data == null) {
+            return;
+        }
+        ToolTrace trace = traces.computeIfAbsent(turnId, ignored -> new ToolTrace());
+        trace.pexelsSearchCalled = true;
+        trace.imageCandidates = true;
+        Binding binding = bindings.get(turnId);
+        if (binding != null) {
+            binding.sink().tryEmitNext(StreamEventVO.imageCandidates(binding.chatId(), data));
+        }
+    }
+
     public ToolTraceSnapshot snapshot(String turnId) {
         ToolTrace trace = turnId != null ? traces.get(turnId) : null;
         if (trace == null) {

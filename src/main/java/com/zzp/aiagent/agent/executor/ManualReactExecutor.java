@@ -7,12 +7,10 @@ import com.zzp.aiagent.agent.task.TaskLedger;
 import com.zzp.aiagent.agent.task.TaskPlan;
 import com.zzp.aiagent.agent.task.TaskStep;
 import com.zzp.aiagent.agent.task.ToolExecutionRecord;
+import com.zzp.aiagent.tool.ToolExecutionContext;
+import com.zzp.aiagent.tool.ToolExecutor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.ChatClientResponse;
-import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
-import org.springframework.ai.chat.memory.ChatMemory;
-import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
@@ -24,17 +22,12 @@ import java.util.Map;
 @Profile("!test")
 public class ManualReactExecutor implements AgentExecutor {
 
-    private final ChatClient chatClient;
     private final TaskLedger taskLedger;
+    private final ToolExecutor toolExecutor;
 
-    public ManualReactExecutor(ChatModel chatModel, ChatMemory chatMemory,
-                                TaskLedger taskLedger) {
+    public ManualReactExecutor(TaskLedger taskLedger, ToolExecutor toolExecutor) {
         this.taskLedger = taskLedger;
-        this.chatClient = ChatClient.builder(chatModel)
-                .defaultAdvisors(
-                        MessageChatMemoryAdvisor.builder(chatMemory).build()
-                )
-                .build();
+        this.toolExecutor = toolExecutor;
     }
 
     @Override
@@ -48,6 +41,7 @@ public class ManualReactExecutor implements AgentExecutor {
         log.info("[ManualReact] execute turnId={} type={} steps={}", turnId, plan.taskType(), plan.steps().size());
 
         StringBuilder output = new StringBuilder();
+        ToolExecutionContext executionContext = new ToolExecutionContext(input);
         for (TaskStep step : plan.steps()) {
             if (!dependenciesSatisfied(step, turnId)) {
                 log.warn("[ManualReact] skipping step {}, dependencies not met", step.code());
@@ -63,9 +57,21 @@ public class ManualReactExecutor implements AgentExecutor {
             log.info("[ManualReact] executing step {}", step.code());
 
             try {
-                String stepResult = executeStep(step, input);
-                output.append(stepResult).append("\n");
-                taskLedger.completeStep(turnId, step.code(), toolRecordForStep(turnId, step, stepResult));
+                if (step.toolName() == null) {
+                    taskLedger.completeStep(turnId, step.code(), null);
+                    continue;
+                }
+                taskLedger.beforeCall(turnId, step.toolName(), step.input());
+                ToolExecutionRecord record = toolExecutor.execute(turnId, step, executionContext);
+                if (!record.success()) {
+                    taskLedger.recordFailure(turnId, step.toolName(), step.input(), record.errorMessage());
+                    throw new IllegalStateException(record.errorMessage());
+                }
+                taskLedger.recordSuccess(turnId, step.toolName(), record.input(),
+                        record.output(), record.sideEffect());
+                taskLedger.completeStep(turnId, step.code(), null);
+                executionContext.record(step.code(), record);
+                output.append(formatStepResult(step, record)).append("\n");
             } catch (Exception e) {
                 log.error("[ManualReact] step {} failed: {}", step.code(), e.getMessage());
                 taskLedger.failStep(turnId, step.code(), e.getMessage());
@@ -82,9 +88,7 @@ public class ManualReactExecutor implements AgentExecutor {
     @Override
     public Flux<ChatClientResponse> stream(AgentInput input) {
         AgentResult result = execute(input);
-        if (result.state() == AgentState.ERROR) {
-            return Flux.error(new RuntimeException(result.content()));
-        }
+        if (result.state() == AgentState.ERROR) return Flux.error(new RuntimeException(result.content()));
         return Flux.empty();
     }
 
@@ -97,25 +101,17 @@ public class ManualReactExecutor implements AgentExecutor {
         return true;
     }
 
-    private String executeStep(TaskStep step, AgentInput input) {
-        if (step.toolName() == null) {
-            return chatClient.prompt()
-                    .user(input.userText())
-                    .call()
-                    .content();
+    private static String formatStepResult(TaskStep step, ToolExecutionRecord record) {
+        if ("searchGallery".equals(step.toolName())) {
+            return "图库搜索完成，找到 " + record.output().getOrDefault("resultCount", 0) + " 张参考图。";
         }
-        return chatClient.prompt()
-                .user(step.description() + ": " + input.userText())
-                .call()
-                .content();
-    }
-
-    private ToolExecutionRecord toolRecordForStep(String turnId, TaskStep step, String result) {
-        return ToolExecutionRecord.success(turnId,
-                step.toolName() != null ? step.toolName() : "respond",
-                step.input() != null ? step.input() : Map.of(),
-                Map.of("result", result),
-                ToolExecutionRecord.NONE);
+        if ("generateImage".equals(step.toolName())) {
+            return "图片已生成。";
+        }
+        if ("analyzeImage".equals(step.toolName())) {
+            return "图片分析完成。";
+        }
+        return step.description() + "已完成。";
     }
 
     private static String turnIdFrom(Map<String, Object> toolContext) {

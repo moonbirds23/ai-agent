@@ -26,6 +26,14 @@ public class RecoveryPolicy {
         long passedCount = stepResults.values().stream().filter(Boolean::booleanValue).count();
         long totalRequired = plan.steps().stream().filter(TaskStep::required).count();
 
+        if (plan.requiresGeneration()
+                && hasFailed(records, "pexelsSearchPhotos")
+                && !hasFailed(records, "generateImage")) {
+            return RecoveryAction.retry(
+                    "网络参考图搜索失败，可移除搜索步骤并直接根据原始描述重新生成图片",
+                    "generateImage");
+        }
+
         if (passedCount > 0 && passedCount < totalRequired) {
             List<String> failedSteps = stepResults.entrySet().stream()
                     .filter(e -> !e.getValue())

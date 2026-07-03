@@ -307,20 +307,21 @@ Advisor 内抛 `BusinessException` → `ExceptionGuardAdvisor`（order=MAX）兜
 
 ## Agent 架构
 
-### 当前方案：Spring AI 自动工具执行 + Agent 壳层
+### 当前方案：LLM 规划 + Hybrid Executor + 后端验收
 
 ```
 ChatServiceImpl (编排角色)
-  ├─ 预处理：autoSaveToCacheGallery / buildUserText / createMedia / toolContext
-  ├─ 委托 Agent.run() / Agent.streamRaw()
-  │    ├─ AgentContext (IDLE→RUNNING→FINISHED/ERROR)
-  │    ├─ AgentTraceAdvisor (order=5, 轮次观测)
-  │    └─ ChatClient (Spring AI 多步工具执行)
-  │         └─ Advisor 链: ContentGuard(0) → AgentTrace(5) → MCMA → Logging(30) → ExceptionGuard(MAX)
-  └─ 后处理：guardHallucinatedImageResult / ChatResponseVO 构建
+  ├─ LlmTaskPlanner → Validator → Repair → Rule fallback
+  ├─ MemoryContextBuilder 构建干净历史
+  ├─ AgentExecutorRouter
+  │    ├─ SpringAiAutoToolExecutor：聊天/简单工具调用
+  │    └─ ManualReactExecutor：按 dependsOn 执行组合任务
+  │         └─ BackendToolExecutor：真实调用 Gallery/Vision/Image 服务
+  ├─ TaskLedger → TaskVerifier → RecoveryPolicy
+  └─ ResponseComposer → MemoryWriter（仅可信内容）
 ```
 
-核心原则：**意图由模型判断，结果由后端确认**。Agent 不重写工具执行循环（Spring AI 已成熟），而是在 Advisor 层补充状态管理、步数控制、可观测性。任务交付验收由 `ToolProgressContext`（Phase A）+ 后续 `TaskVerifier`（Phase C）负责。
+核心原则：**LLM 理解和生成，后端校验、执行、记账和验收**。自动执行路径保留 Spring AI Tool Calling；强顺序任务走后端计划执行，不依赖模型是否愿意发出 tool call。ChatMemory 由编排层显式读写，不保存本轮增强上下文和未验收 raw response。
 
 ### 后续深入学习方向：手动 ReAct 循环
 
@@ -480,14 +481,22 @@ public interface ImageGenerationService {
 - [x] **PostgreSQL 默认化 + 经典 RAG 清理**（2026-06：删除 `GalleryRagRetriever`/`SimpleVectorStore`/`SimpleVectorIndexService`/JSON文件存储/`NoopChatHistoryRepository`/`VectorStorePersistence`；PG 配置合并到 `application.yml`；`@Profile("postgres")` → `@Profile("!test")`；删除 `@Primary`；`RagServiceImpl` 始终走增强检索；`PostgresAutoConfig` 按需导入 DataSource）
 - [x] **Pexels 图片搜索 @Tool 集成**（`PexelsSearchTools`：搜索/精选/下载入库/详情 4 工具，预留 `PexelsPhotoService` 接口支持后续 MCP 抽离）
 - [x] **Agent 核心框架 Phase A+B**（2026-06-05：`Agent` + `AgentConfig` + `AgentState` + `AgentContext` + `AgentTraceAdvisor`；ChatServiceImpl 委托 Agent 执行；system prompt 升级为推理框架+交付规则+终止条件；幻觉拦截改以 trace 为唯一权威；`ToolProgressContext` 工具计数+分类上限；生图保存失败不静默；CLAUDE.md 记录手动 ReAct 循环作为后续学习方向）
-- [ ] **Agent Phase C：任务验收层**（TaskLedger + TaskVerifier + ResponseComposer）
+- [x] **Agent Phase C：任务验收层**（TaskLedger + TaskVerifier + ResponseComposer）
 - [x] **Agent Phase C+：任务生命周期闭环**（2026-06-09：TaskPlanner/TaskPlan/TaskStep 前置计划→TaskLedger 生命周期→TaskVerifier 按计划验收→RecoveryPolicy 恢复建议→SSE task_planned/task_verified）
-- [x] **Agent Phase D：记忆治理 + Prompt 精简 + 规划校验修复 + Executor 抽象**（2026-06-10：5 域并行实现）
+- [x] **Agent Phase D：记忆治理 + Prompt 精简 + 规划校验修复 + Executor 抽象**（2026-06-10：端到端接入完成）
   - A-记忆治理：MemoryEntryType/MemoryEntry 分层模型、MemoryClassifier 按来源+验证结果分类、MemorySanitizer 伪工具调用/假图片占位过滤、MemoryWriter 可信写入、MemoryContextBuilder 干净上下文构建、MemorySummaryService 资源摘要
   - B-Prompt 管理：system.st 从 ~120 行精简到 ~20 行（身份+少量原则）、TaskPromptBuilder 动态生成本轮任务提示、PromptBudgetManager 按优先级裁剪
   - C-规划校验修复：TaskStep 扩展 dependsOn/input/StepStatus、TaskPlan 扩展 slots、LlmTaskPlanner 编排 Plan→Validate→Repair 流水线、TaskPlanValidator 工具白名单+步骤完整性+依赖检查、TaskPlanRepair 补全缺失步骤+修复依赖
   - D-Executor 抽象：AgentExecutor 接口 + SpringAiAutoToolExecutor（Spring AI 自动工具）+ ManualReactExecutor（TaskPlan 驱动步骤执行+依赖检查）
   - E-验收恢复可观测：TaskLedger 步骤级状态追踪（startStep/completeStep/failStep）、TaskVerifier.verifySteps 分步验收、RecoveryPolicy 增强部分成功/分步骤失败检测、StreamEventVO 新增 task_step_started/completed/failed + recovery_suggested
+
+### Agent 运行边界
+
+- `ChatServiceImpl` 负责单轮规划、干净历史构建、执行器选择、验收和可信记忆写入。
+- `SpringAiAutoToolExecutor` 用于聊天和简单工具任务；`ManualReactExecutor` 用于强依赖组合任务。
+- 手写执行器不得根据模型文本伪造成功，工具证据只能来自 `BackendToolExecutor` 的真实服务调用。
+- `MessageChatMemoryAdvisor` 不参与 Agent 运行时写入；RAG、参考图详情、Task Prompt 和失败 raw response 不进入 Working Memory。
+- `TaskVerifier` 必须先检查全部 required step，再判断任务级结果。
 
 ## 测试分类
 
