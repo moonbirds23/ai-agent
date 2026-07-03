@@ -219,45 +219,6 @@ src/main/java/com/zzp/aiagent
 
 ---
 
-## 核心设计决策
-
-### 为什么 LLM 规划 + 后端验收？
-
-Spring AI 的 Tool Calling 在复杂多步骤任务中依赖模型判断是否调用工具。当任务有严格顺序依赖时（如"先搜图库→再基于参考图生图"），模型可能跳过搜索直接生成。
-
-本项目的解法：**LLM 负责理解与生成，后端负责规划、执行与验收。**
-- `TaskPlanner` 提前制定确定性执行计划
-- `ManualReactExecutor` 按 dependsOn 排序步骤，强制按序执行
-- `TaskVerifier` 按计划逐步骤检查执行证据，不依赖模型声称的结果
-
-### 为什么不直接用 Spring AI 的自动 Tool Calling？
-
-自动模式用于聊天、简单查询等不需要严格执行顺序的场景。Hybrid 模式（默认）下，`AgentExecutorRouter` 根据 `TaskType` 和步骤依赖自动选择：
-
-| 场景 | 执行器 | 原因 |
-|------|--------|------|
-| 聊天 / 简单查询 | SpringAiAutoExecutor | 让模型自由选择工具 |
-| 图库管理操作 | SpringAiAutoExecutor | 单步操作，无需顺序控制 |
-| CREATIVE_WORKFLOW | ManualReactExecutor | 搜图→分析→生图，依赖链 |
-| 步骤含 dependsOn | ManualReactExecutor | 步骤间有因果依赖 |
-
-### 为什么 Redis + PostgreSQL 双层记忆？
-
-- **Redis**：毫秒级读取，支持 TTL 自动过期，适合热对话数据
-- **PostgreSQL**：永久持久化，支持 SQL 查询，适合审计和统计
-- **写入策略**：实时写 Redis（异步写 PG），读取优先 Redis，会话过期从 PG 恢复
-
----
-
-## 待做 (Roadmap)
-
-- [ ] 智谱 GLM-Image 图生图 API 接入（当前 CogView-4 仅文生图）
-- [ ] 图库元数据来源字段补充（图片出处/来源类型追溯）
-- [ ] 手动 ReAct 循环模式（参考 yu-ai-agent-master 项目）
-- [ ] MCP Server 化工具集封装
-
----
-
 ## License
 
 MIT
