@@ -12,7 +12,6 @@
 
 **基于 Spring AI 的多模态 AI Agent，实现对话式图片生成、图库管理与检索增强。** 全链路接入智谱 GLM 大模型（GLM-4-Flash / GLM-4.5V / CogView-4 / Embedding-2），支持流式 SSE 响应、LLM 驱动的任务规划与 WorkflowEngine 工作流引擎、三层 RAG 检索增强、PGVector 语义检索。
 
-> 🎯 项目定位：AI Agent 架构学习与面试展示项目，重点展示 Agent 设计模式、RAG 工程实践和 LLM 应用架构能力。
 
 ---
 
@@ -101,7 +100,7 @@
 - **SSRF 防护**：`UrlSecurityValidator` 校验内网地址
 - **内容安全**：`ContentGuardAdvisor` 关键词 + 格式校验
 - **API Key 认证**：`ApiKeyAuthFilter` + Spring Security（`@Profile("!test")`）
-- **速率限制**：`RateLimitInterceptor` — chat 10/min, upload 10/min, 其他 30/min
+- **速率限制**：`RedisRateLimiter` — Lua 脚本滑动窗口，分布式部署共享计数
 - **XSS 防护**：前端 `escHtml()` / `escAttr()` / `jsString()` 三层转义
 
 ### 生产就绪
@@ -110,7 +109,7 @@
 - **优雅关闭**：`server.shutdown: graceful` + 30s 等待 SSE 完成
 - **日志**：logback 控制台 + 文件滚动（30 天/3GB）
 - **CI**：GitHub Actions `mvn test` on push/PR
-- **容器化**：Dockerfile + docker-compose（PG + Redis + App 编排）
+- **容器化**：多阶段 Dockerfile（Maven 构建 → JRE 运行）+ docker-compose（PG + Redis + App 编排）
 - **熔断降级**：Resilience4j CircuitBreaker + Retry（智谱 3 实例）
 
 ---
@@ -128,14 +127,14 @@
 git clone https://github.com/moonbirds23/ai-agent.git
 cd ai-agent
 
-# 设置 API Key
+# 设置 API Key（必填，否则 AI 调用会失败）
 export ZHIPU_API_KEY=你的智谱API密钥
-export APP_API_KEY=自定义访问密码
+export APP_API_KEY=自定义访问密码    # 前端访问需要
 
-# 启动 PostgreSQL + Redis + App
+# 一条命令：编译打包 + 启动 PostgreSQL + Redis + App
 docker compose up -d
 
-# 确认启动成功
+# 等待约 30 秒（首次需下载依赖），确认启动成功
 curl http://localhost:8231/api/health
 # → {"code":0,"data":"ok","message":"ok"}
 ```

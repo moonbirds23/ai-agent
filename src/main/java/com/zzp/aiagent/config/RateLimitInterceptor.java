@@ -5,36 +5,33 @@ import com.zzp.aiagent.common.BaseResponse;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.HandlerInterceptor;
 
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
-import java.util.concurrent.ConcurrentHashMap;
-
 /**
- * 基础速率限制拦截器，基于 ConcurrentHashMap + 滑动窗口的内存实现。
+ * 速率限制拦截器，委托 {@link RedisRateLimiter} 做分布式滑动窗口限流。
+ * <p>
  * 不同接口不同限制：
- *   /api/chat           → 10 次/分钟
- *   /api/gallery/upload → 10 次/分钟
- *   其他                → 30 次/分钟
- * 超限返回 429 + BaseResponse JSON。
+ * <ul>
+ *   <li>/api/chat           → 10 次/分钟</li>
+ *   <li>/api/gallery/upload → 10 次/分钟</li>
+ *   <li>其他                 → 30 次/分钟</li>
+ * </ul>
+ * Redis 不可用时降级放行，避免单点故障阻断所有请求。
  */
 @Component
+@Profile("!test")
 @Slf4j
 public class RateLimitInterceptor implements HandlerInterceptor {
 
-    private final ConcurrentHashMap<String, List<Long>> counter = new ConcurrentHashMap<>();
+    private final RedisRateLimiter rateLimiter;
     private final ObjectMapper objectMapper;
 
-    private static final long WINDOW_MS = 60_000;
-    private static final int CHAT_LIMIT = 10;
-    private static final int UPLOAD_LIMIT = 10;
-    private static final int DEFAULT_LIMIT = 30;
     private static final int RATE_LIMIT_CODE = 42900;
 
-    public RateLimitInterceptor(ObjectMapper objectMapper) {
+    public RateLimitInterceptor(RedisRateLimiter rateLimiter, ObjectMapper objectMapper) {
+        this.rateLimiter = rateLimiter;
         this.objectMapper = objectMapper;
     }
 
@@ -43,47 +40,16 @@ public class RateLimitInterceptor implements HandlerInterceptor {
                              Object handler) throws Exception {
         String ip = request.getRemoteAddr();
         String uri = request.getRequestURI();
-        String key = ip + ":" + uri;
-        long now = System.currentTimeMillis();
 
-        int limit = resolveLimit(uri);
-
-        List<Long> timestamps = counter.computeIfAbsent(key,
-                k -> Collections.synchronizedList(new ArrayList<>()));
-
-        synchronized (timestamps) {
-            timestamps.removeIf(t -> now - t > WINDOW_MS);
-
-            // Evict empty entries to prevent unbounded map growth
-            if (timestamps.isEmpty()) {
-                counter.remove(key);
-                return true;
-            }
-
-            if (timestamps.size() >= limit) {
-                log.warn("[RateLimit] 触发限流 ip={} uri={} count={} limit={}",
-                        ip, uri, timestamps.size(), limit);
-                response.setStatus(429);
-                response.setContentType("application/json;charset=UTF-8");
-                BaseResponse<Void> errorResp = new BaseResponse<>(
-                        RATE_LIMIT_CODE, null, "请求过于频繁，请稍后再试");
-                response.getWriter().write(objectMapper.writeValueAsString(errorResp));
-                return false;
-            }
-
-            timestamps.add(now);
+        if (rateLimiter.tryAcquire(ip, uri)) {
+            return true;
         }
 
-        return true;
-    }
-
-    private int resolveLimit(String uri) {
-        if (uri.startsWith("/api/chat")) {
-            return CHAT_LIMIT;
-        }
-        if (uri.startsWith("/api/gallery/upload")) {
-            return UPLOAD_LIMIT;
-        }
-        return DEFAULT_LIMIT;
+        response.setStatus(429);
+        response.setContentType("application/json;charset=UTF-8");
+        BaseResponse<Void> errorResp = new BaseResponse<>(
+                RATE_LIMIT_CODE, null, "请求过于频繁，请稍后再试");
+        response.getWriter().write(objectMapper.writeValueAsString(errorResp));
+        return false;
     }
 }
