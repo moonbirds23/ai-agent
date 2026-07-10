@@ -1,0 +1,41 @@
+server:
+  port: 8232
+
+spring:
+  application:
+    name: image-retrieval-mcp-server
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/ai_agent}
+    username: ${DB_USERNAME:postgres}
+    password: ${DB_PASSWORD:}
+    driver-class-name: org.postgresql.Driver
+  flyway:
+    enabled: false
+  ai:
+    mcp:
+      server:
+        enabled: true
+        name: image-retrieval-server
+        version: 1.0.0
+        type: SYNC
+        sse-endpoint: /sse
+        sse-message-endpoint: /mcp/message
+        capabilities:
+          tool: true
+          resource: false
+          prompt: false
+          completion: false
+    vectorstore:
+      pgvector:
+        initialize-schema: false
+
+pexels:
+  api-key: ${PEXELS_API_KEY:}
+  base-url: ${PEXELS_BASE_URL:https://api.pexels.com}
+  connect-timeout-seconds: 10
+  read-timeout-seconds: 30
+  search-max-results: 5
+
+logging:
+  level:
+    com.zzp.imageretrievalmcp: INFO

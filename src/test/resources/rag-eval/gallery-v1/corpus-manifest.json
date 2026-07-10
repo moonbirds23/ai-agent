@@ -1,0 +1,520 @@
+{
+  "datasetVersion": "gallery-v1",
+  "createdAt": "2026-07-10",
+  "embeddingModel": "embedding-2",
+  "embeddingDimensions": 1024,
+  "indexTextVersion": "v1",
+  "pictureCount": 102,
+  "pictures": [
+    {
+      "pictureId": 101,
+      "picHash": "ee6bdd902f6db0f376e2829ebb5745cbe632befec45559b75bc3104d4a3b5287",
+      "name": "Flickr-watercolor"
+    },
+    {
+      "pictureId": 60,
+      "picHash": "d70ca7f4e1f9e8efe187a4d017ec9addf873dbb56a82f3b8bcce16fad915e568",
+      "name": "Picsum-031"
+    },
+    {
+      "pictureId": 104,
+      "picHash": "a57edd7c9536dcd9df959e5a23b218833837d9f0736668396cbcb7a65e851d05",
+      "name": "Flickr-sketch"
+    },
+    {
+      "pictureId": 49,
+      "picHash": "188fb2cdfcf0add00235e93970f1c97112476fa38b848fbea1d4eddd97f18a07",
+      "name": "Picsum-020"
+    },
+    {
+      "pictureId": 77,
+      "picHash": "0d8f164a7eab81312c6807aab2dba131a662f09a1ef98b824970b61045422ba3",
+      "name": "Picsum-048"
+    },
+    {
+      "pictureId": 54,
+      "picHash": "9e3d0d7a43d4d8d54a5d4e7fc4b63f0b2b8a0612fef4ca1438e0cdb1ae97dbeb",
+      "name": "Picsum-025"
+    },
+    {
+      "pictureId": 95,
+      "picHash": "b660d94e6d7c6a598285c93cb1563ed0067b931f6c939c12f8b64de9ea933d09",
+      "name": "Picsum-066"
+    },
+    {
+      "pictureId": 39,
+      "picHash": "ef7a3a043ab2bd26859a7b324f7616094c82b55256c233ce1f93a3befc6d99ba",
+      "name": "Picsum-010"
+    },
+    {
+      "pictureId": 71,
+      "picHash": "e21e3338417d9b92dbd40b618aaa2f96fcfdcf6eec8a5eb0a31ae553e74dcc38",
+      "name": "Picsum-042"
+    },
+    {
+      "pictureId": 97,
+      "picHash": "1243c318ca09c90006319a64b443ffb30340265fa52153a9810be2a40b743add",
+      "name": "Picsum-068"
+    },
+    {
+      "pictureId": 58,
+      "picHash": "fad36c38795f40c4880fd85b624c15ef471f200a8ad11432240d806d1f9f0ee2",
+      "name": "Picsum-029"
+    },
+    {
+      "pictureId": 132,
+      "picHash": "9849f0546c60b4a5ace72eff6d28a56049fcf916b145f10bfc8b06f62c98194e",
+      "name": "web-import-1780668236249"
+    },
+    {
+      "pictureId": 107,
+      "picHash": "a861ec2c42735e8eed4b883adc94bcfb24b1cdcef8dbd2be3fc0d120121a3b38",
+      "name": "Flickr-japanese"
+    },
+    {
+      "pictureId": 36,
+      "picHash": "e7525d0874fc9dce728e3678ed92e0c11663b7fef821a8df7a8c478277148b2e",
+      "name": "Picsum-007"
+    },
+    {
+      "pictureId": 91,
+      "picHash": "32dfb0a83e4739b3b43966a20f5c8fba3e65b9ba9b1fa057d5ab3a98f53f7a1f",
+      "name": "Picsum-062"
+    },
+    {
+      "pictureId": 50,
+      "picHash": "d1a606009662600b9917640908265cffe4a90221d7f3a051aedbc39d5c499d84",
+      "name": "Picsum-021"
+    },
+    {
+      "pictureId": 93,
+      "picHash": "0c9027d82b71be40ff2d5151fda59c7e3a95f00361c09d72234c66324958cdd3",
+      "name": "Picsum-064"
+    },
+    {
+      "pictureId": 67,
+      "picHash": "04934397522582ca6712ef0e61663403fb0e36c32e4ce3614d5c985350bc8f17",
+      "name": "Picsum-038"
+    },
+    {
+      "pictureId": 55,
+      "picHash": "d0712f30a77af273810dadc9ce6ecadd67f214fdfccca5fa17284ef60b17fa2b",
+      "name": "Picsum-026"
+    },
+    {
+      "pictureId": 105,
+      "picHash": "3fac7e39b01b92ae8a489a242fc41e8cf5efa4f827782db03bb9289677e4d6db",
+      "name": "Flickr-nature"
+    },
+    {
+      "pictureId": 69,
+      "picHash": "2f0ff07600f5a45575356fc009c88021c31b8d3471649585f3a515c5ae5a370c",
+      "name": "Picsum-040"
+    },
+    {
+      "pictureId": 44,
+      "picHash": "5acd9f9a23748f0283d287bb0a0d79e9e37492f6977142af8b61c68237ee5a9d",
+      "name": "Picsum-015"
+    },
+    {
+      "pictureId": 62,
+      "picHash": "a1b7cba90dd16eab0e5808e3668f3f1a4b54acb4d8990b8465ce4b1d973b09e3",
+      "name": "Picsum-033"
+    },
+    {
+      "pictureId": 106,
+      "picHash": "59d8a5cb3b96365a974853b846acec58d6e89fe82fe24a7807f0e9a28a5d8d5d",
+      "name": "Flickr-street"
+    },
+    {
+      "pictureId": 114,
+      "picHash": "387e44dd3858ed9ff17dca9ae38fb8af00268333422fca8b200e8076ee82cc2b",
+      "name": "web-import-1780562221726"
+    },
+    {
+      "pictureId": 110,
+      "picHash": "d265009ca62388508ddaafe2c74fba13dbbcd5ef34705cad82d22d39cfb0ea12",
+      "name": "A breathtaking landscape photo with rolling hills, a serene lake reflecting the vibrant sunset sky, warm golden hour light, artistic impressionism style, high-resolution image quality"
+    },
+    {
+      "pictureId": 32,
+      "picHash": "3b0eb45867531a0f817438599af0cf4907dd193690bf474bb8c5f2055ce729e4",
+      "name": "Picsum-003"
+    },
+    {
+      "pictureId": 102,
+      "picHash": "d740a816b6c492acaeb9efc101243ee11a8e879246e02ac5466b1feea396a29d",
+      "name": "Flickr-oil"
+    },
+    {
+      "pictureId": 76,
+      "picHash": "1b918dfbdd98b80b0a57843f8cf4fe98d820740e02223ff68d3f1746f58ba73c",
+      "name": "Picsum-047"
+    },
+    {
+      "pictureId": 38,
+      "picHash": "234d0f1beaddfecc9b419b638efb824df8f4c74c5cedd530263a1a68fcae7343",
+      "name": "Picsum-009"
+    },
+    {
+      "pictureId": 84,
+      "picHash": "d469aa7100bbb3c4bc15093493f5e19b070f65fbd140c19a7781d8b5a4113f95",
+      "name": "Picsum-055"
+    },
+    {
+      "pictureId": 99,
+      "picHash": "71846d404e230b92575c31f5e9320191d1fd75f0364b31fa3be330719efdc72f",
+      "name": "Picsum-070"
+    },
+    {
+      "pictureId": 94,
+      "picHash": "d0fba00b601512c15062e91164e178ebb0d02df65b34694b3ffbbe94882e94fa",
+      "name": "Picsum-065"
+    },
+    {
+      "pictureId": 31,
+      "picHash": "3e0b75d26efdeac090ea9fb72e6aafc12bd338774b5f27cb8cb8dcf372ff21ea",
+      "name": "Picsum-002"
+    },
+    {
+      "pictureId": 64,
+      "picHash": "993fb60d4cbeb7bcd759b716642b56d0b3161e3b760f1649a4e266f05aa91ab4",
+      "name": "Picsum-035"
+    },
+    {
+      "pictureId": 127,
+      "picHash": "f663f93bf82322a9a18f80326c4258e5e2c463c549d4fe8d84709b3222d09bfc",
+      "name": "雪景 摄影图__自然风景_自然景观_摄影图库_昵图网"
+    },
+    {
+      "pictureId": 47,
+      "picHash": "5ed6cbe73751f0704a25eaec4330658c25d315464edb97f89ef1d2341bc63771",
+      "name": "Picsum-018"
+    },
+    {
+      "pictureId": 116,
+      "picHash": "c41350c4287e314d8f676b96c7e58f1a9b07c8d4fe400aafac932e7adbf52c60",
+      "name": "a cute puppy in a flower field, fluffy fur, vibrant colors, sunny day, green gra..."
+    },
+    {
+      "pictureId": 81,
+      "picHash": "4e7f3a78f397b481a796559fe74d099489e7558ed4dd5f5b7c44c7efa981e1c8",
+      "name": "Picsum-052"
+    },
+    {
+      "pictureId": 123,
+      "picHash": "de1bb204f10f93497fe3929a3422b6241c9e05c2917c042a117c8d08e6ad1998",
+      "name": "400+ Free Snowscape & Winter Images - Pixabay"
+    },
+    {
+      "pictureId": 90,
+      "picHash": "4692b44e3cab80117dc8ef1fad8426a6052b6875d5a2a8f5b2bd6f62113f0e16",
+      "name": "Picsum-061"
+    },
+    {
+      "pictureId": 37,
+      "picHash": "a5613b2c4423cee3766ea485310d8330fd8fd3dcfdd4c27633a2bcd9d2beb5f9",
+      "name": "Picsum-008"
+    },
+    {
+      "pictureId": 115,
+      "picHash": "383264e5e90de2ca52baf702f98d1b03f2e25b29407422a7ebcbc399b685dc42",
+      "name": "imported-image"
+    },
+    {
+      "pictureId": 40,
+      "picHash": "a80548cb1db7be669a68413b987691e9142a8b37e1aa23b5364ab9ad16131fea",
+      "name": "Picsum-011"
+    },
+    {
+      "pictureId": 92,
+      "picHash": "1f2fe6da82aad388b790050d218dd1057665b4a7323f7bda5b56bf63a65e91d7",
+      "name": "Picsum-063"
+    },
+    {
+      "pictureId": 33,
+      "picHash": "67495577969b971edc68e2702c4fbb397d0794cc2a0b914c65cf225c3818423d",
+      "name": "Picsum-004"
+    },
+    {
+      "pictureId": 78,
+      "picHash": "ac20b77f36e0f9892a3b5f59c0e9fabdb5e576e9a583efdbd415b3e4ca2de215",
+      "name": "Picsum-049"
+    },
+    {
+      "pictureId": 66,
+      "picHash": "7cbf55ab28cd419a02eea6063f84241392eb2c15321d6cf1509ba1c8ada648b6",
+      "name": "Picsum-037"
+    },
+    {
+      "pictureId": 63,
+      "picHash": "111db9bd9ae8ad31c591199e0e6373635299f44b1d8305606267132fa73c2805",
+      "name": "Picsum-034"
+    },
+    {
+      "pictureId": 134,
+      "picHash": "5ae4682398344851b25e9dd72555df4d0a856bf586093438a783b3986dac5483",
+      "name": "chat-image-1781073319857"
+    },
+    {
+      "pictureId": 135,
+      "picHash": "bf40894386a98f4eb730b0ca2fa838ea010591c3777217e194931d9987b08720",
+      "name": "web-import-1781073490979"
+    },
+    {
+      "pictureId": 121,
+      "picHash": "00757bc6b31ea8fd98e564dcbc02873d9c71a07edbdead7e064ef6082cc308fc",
+      "name": "Fluffy & Adorable: tiny fluffy cute dogs Perfect for Cuddling"
+    },
+    {
+      "pictureId": 34,
+      "picHash": "4155c2c805145bb0df471c18672e674443707b14816bb333d2f56785670ed8b9",
+      "name": "Picsum-005"
+    },
+    {
+      "pictureId": 45,
+      "picHash": "a941ec7a3721742ba8a033a1158292d357ac9de0e914c2040ebd3b162d60f586",
+      "name": "Picsum-016"
+    },
+    {
+      "pictureId": 72,
+      "picHash": "cbd2a54f6e55b27772d35dc9bcf754e79629dd4106cabc1d512aa8d50ca040e4",
+      "name": "Picsum-043"
+    },
+    {
+      "pictureId": 100,
+      "picHash": "cf02c8d5d59fd35a391d1f473f40b78fc0fb8bc4906b6656386a89260df0e4c9",
+      "name": "Flickr-cyberpunk"
+    },
+    {
+      "pictureId": 43,
+      "picHash": "f654ba856546ef3206b1ab10ba6af6caf21899e2b840da03bbee81990f2738bd",
+      "name": "Picsum-014"
+    },
+    {
+      "pictureId": 82,
+      "picHash": "c3867b2c670d813e3fd9d5f6e9b109de782e86d4143020cce10b0aa240361dc2",
+      "name": "Picsum-053"
+    },
+    {
+      "pictureId": 73,
+      "picHash": "4e535024a6e82c782be28bec021839cc16dcfe546c5455fdcd78410a6a854167",
+      "name": "Picsum-044"
+    },
+    {
+      "pictureId": 79,
+      "picHash": "f7979aabd5ea6c25aa9d802b27754068d33e47ae96cfd619b83d20de0d22e100",
+      "name": "Picsum-050"
+    },
+    {
+      "pictureId": 30,
+      "picHash": "33d777404493cddc06fc692651a013858e19a9c6c47aca48dc2dbfa40d7cb303",
+      "name": "Picsum-001"
+    },
+    {
+      "pictureId": 118,
+      "picHash": "f152ce9da123bcbfdde81ab7331b62c0eb63756e0f1310951b756c58d6933508",
+      "name": "Top 100 Cutest Dog Breeds: Most Cute Dogs – DYKOT"
+    },
+    {
+      "pictureId": 108,
+      "picHash": "9b80467cffc239a9110057d6fc28f09cc2448dd2146be69b925b71e1e8cc2a6f",
+      "name": "Flickr-futuristic"
+    },
+    {
+      "pictureId": 46,
+      "picHash": "37a951064c81cc4327dc84bc1a77d8a1b6e8b6f07a84ea084530fa27a0314847",
+      "name": "Picsum-017"
+    },
+    {
+      "pictureId": 86,
+      "picHash": "5076573dd60fbe7fd5d7486614247b172bc88ed443ba2b4e4c22671a52ea35a1",
+      "name": "Picsum-057"
+    },
+    {
+      "pictureId": 35,
+      "picHash": "b1d0ad3267528c5a89a4ce33e0b03456b420e82a1cc84873889893da616dd9fe",
+      "name": "Picsum-006"
+    },
+    {
+      "pictureId": 133,
+      "picHash": "e6b07842caa63c772a08bc2c094c7a6bd74bf1c8d35fad6823be1c5c3bedb666",
+      "name": "web-import-1781072903075"
+    },
+    {
+      "pictureId": 120,
+      "picHash": "90d00f5bf0daf2a240a0d9e50a8c4d797d1e948db88803c5522a776af3acc1e5",
+      "name": "Cute Dog Wallpapers - Wallpaper Cave"
+    },
+    {
+      "pictureId": 87,
+      "picHash": "33ba25955ea14baa36647aada0f409d63707b47afccd727f3fa8eebe505a0ed1",
+      "name": "Picsum-058"
+    },
+    {
+      "pictureId": 89,
+      "picHash": "a564c96c783f5dd53ee3ade4ab6515024443392873ba6e0c361731a9e70e8d6f",
+      "name": "Picsum-060"
+    },
+    {
+      "pictureId": 98,
+      "picHash": "32e17af87337e0f3a1936959b95218b9575f7d6af452f96c169b967b9eb1bb98",
+      "name": "Picsum-069"
+    },
+    {
+      "pictureId": 117,
+      "picHash": "6942dac21c272e4006e45add7f22d5ffb6980228a66828f53ad58ab8255ebf8b",
+      "name": "Free photo: Cute dog - Animal, Cute, Dog - Free Download - Jooinn"
+    },
+    {
+      "pictureId": 103,
+      "picHash": "168964e66330146ae49a4aa3985f499242858dc0ffebd8703b1730f4eab81be7",
+      "name": "Flickr-minimalist"
+    },
+    {
+      "pictureId": 56,
+      "picHash": "dac7aabba110facfa3e4a3ced240de7f64591d50596c865bbd5acd268556937c",
+      "name": "Picsum-027"
+    },
+    {
+      "pictureId": 113,
+      "picHash": "dec2989525cc303b181b7e2ebe506659c3d82a1200a63386c763fbb5d9f0016a",
+      "name": "web-import-1780561115968"
+    },
+    {
+      "pictureId": 80,
+      "picHash": "cf5e60972aacc0b03c02fd71b478401b234e0a42c30fb61778eef8deeffa0f8e",
+      "name": "Picsum-051"
+    },
+    {
+      "pictureId": 75,
+      "picHash": "1a9762ea61efbc99265371db6cfa0cb26d4c23080f67e2cb5b8844421b327f88",
+      "name": "Picsum-046"
+    },
+    {
+      "pictureId": 65,
+      "picHash": "48b9e74dab87fb7818db9bbcd14d8e0ede4774183a249007b452fecbfdc23789",
+      "name": "Picsum-036"
+    },
+    {
+      "pictureId": 41,
+      "picHash": "2f00582bdad0a911013cf7b8fa76ed4bf3e8591f04b67b96fa4c08aa7da97cc6",
+      "name": "Picsum-012"
+    },
+    {
+      "pictureId": 70,
+      "picHash": "c151c63724849d9f1915a565b56b6e5e82bf2047c83edc4638e910d8acf88bd5",
+      "name": "Picsum-041"
+    },
+    {
+      "pictureId": 52,
+      "picHash": "49eab8b91c933ac3bc438113790d2072445fff03b3e2b3e275190f90f488c5c5",
+      "name": "Picsum-023"
+    },
+    {
+      "pictureId": 111,
+      "picHash": "9b2e08b6d152f7c71b0600564112dc5154affedbd8e90f1072e86bc0db32c5d2",
+      "name": "a realistic photo of the BigBang idol group, close-up portrait, vibrant colors, ..."
+    },
+    {
+      "pictureId": 96,
+      "picHash": "30f534429853813c819c9ca6dc452b53b73e559359cf42dccee479ee30ea7b8b",
+      "name": "Picsum-067"
+    },
+    {
+      "pictureId": 57,
+      "picHash": "3687d7fbf1425f4d4ac0610ffa685ec5425f0bdbecf6077cd492b5b3e4197618",
+      "name": "Picsum-028"
+    },
+    {
+      "pictureId": 59,
+      "picHash": "6821b72f03d681ca3c6fbb84424d21fd7b3ef92dfc1b6251d2ad8b5855c2fe1e",
+      "name": "Picsum-030"
+    },
+    {
+      "pictureId": 68,
+      "picHash": "5655ef01f6a1c7dce367b0033df3070aa405463cdcdaa8eeda305e8ddb694e48",
+      "name": "Picsum-039"
+    },
+    {
+      "pictureId": 53,
+      "picHash": "740e8659c987df2c46fe3017bdd25d2d78117cd1863a048fe5b03a49b26bcfc6",
+      "name": "Picsum-024"
+    },
+    {
+      "pictureId": 42,
+      "picHash": "433bb326a86828dcb0b86bccb8e05cbeeb984ad6d409109b2fcd1ea9eaad1042",
+      "name": "Picsum-013"
+    },
+    {
+      "pictureId": 109,
+      "picHash": "7caae5198dc385a0759c1b547bf0635b3c1592afbd9e920befcc870bf20d00bb",
+      "name": "Flickr-graffiti"
+    },
+    {
+      "pictureId": 74,
+      "picHash": "f7adcdd4fa4fa61d8f71aa755ed093e5ada7fd3a9b6c06cbfb74796d285202ba",
+      "name": "Picsum-045"
+    },
+    {
+      "pictureId": 51,
+      "picHash": "4264b7ea44f4e946e2204b962917bfc28594b443a9bf7a26b3626d4e13ceea3c",
+      "name": "Picsum-022"
+    },
+    {
+      "pictureId": 85,
+      "picHash": "ec72a0e5f80cca6618c084a9a3eb081af9b53b9f935c65a7034807ef0eca4e82",
+      "name": "Picsum-056"
+    },
+    {
+      "pictureId": 88,
+      "picHash": "a80516f2853a06a9787dac0ec8759db3413f76ad0b09aba6b9855c01db38b2aa",
+      "name": "Picsum-059"
+    },
+    {
+      "pictureId": 48,
+      "picHash": "f0ffbb04f8b6282662a4d2bba0eff9ba87008d8d7aa43c9b77e8836b50770891",
+      "name": "Picsum-019"
+    },
+    {
+      "pictureId": 61,
+      "picHash": "773a8e70f5d202bc23863b7e2327dc72f57e17508db421a0d38ae9137c775132",
+      "name": "Picsum-032"
+    },
+    {
+      "pictureId": 29,
+      "picHash": "5c546dd5684c128c713cae901105be759fc2c52b03c238011135b6d592a9cfd0",
+      "name": "雪景1"
+    },
+    {
+      "pictureId": 119,
+      "picHash": "6ad0c3510b9e722d6a8669174a02eea92bdcd20efa11946a923de6f73cdb1196",
+      "name": "Cute Dog Wallpapers on WallpaperDog"
+    },
+    {
+      "pictureId": 126,
+      "picHash": "0dffee8b469bca22a65f7fb2559e16d320ece469e2102404ca2859deee0b70ad",
+      "name": "snow"
+    },
+    {
+      "pictureId": 125,
+      "picHash": "2104879e20584a75a82cec63fec6766bd396b414436f459444ea96c89c4a2275",
+      "name": "31 Cool Snowscapes for Inspiration | Light Stalking"
+    },
+    {
+      "pictureId": 130,
+      "picHash": "0867bc9e6e85b5bfb173622a21abb958cd952ef2e35374a92625c9c08aefbc2a",
+      "name": "著名赏樱胜地冬天的雪景神奇而美丽！｜绝景日本"
+    },
+    {
+      "pictureId": 124,
+      "picHash": "08c23df946f3faf1234c014259c00327e4f8fe771c4e3bf29da130087a30557c",
+      "name": "Snowscape Stock Video Footage for Free Download"
+    },
+    {
+      "pictureId": 128,
+      "picHash": "e86857a500aeccef0a3659d554d4f982a7f9e69d6e8a2b5bcf28782a425e2413",
+      "name": "雪景 摄影图__自然风景_旅游摄影_摄影图库_昵图网"
+    }
+  ]
+}

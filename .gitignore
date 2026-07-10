@@ -46,7 +46,6 @@ gallery-data/
 docs/*
 !docs/plots/
 !docs/plots/*.png
-!docs/architecture-diagram-prompts.md
 mianshiTest.md
 project-note/
 /interview-kb/

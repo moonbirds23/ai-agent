@@ -10,7 +10,7 @@ import com.zzp.aiagent.service.RagContextPacker;
 import com.zzp.aiagent.service.RagQueryRewriteService;
 import com.zzp.aiagent.service.RagReranker;
 import com.zzp.aiagent.domain.rag.RagRewriteResult;
-import com.zzp.aiagent.domain.rag.RagTrace;
+
 import com.zzp.aiagent.service.RagTraceService;
 import com.zzp.aiagent.service.StyleTemplateService;
 import com.zzp.aiagent.service.impl.RagServiceImpl;

@@ -41,7 +41,9 @@ public class SecurityConfig {
             "/actuator/**",
             "/api/doc.html",
             "/api/v3/api-docs/**",
-            "/api/swagger-ui/**"
+            "/api/swagger-ui/**",
+            "/api/gallery/files/**",
+            "/api/template/**"
     };
 
     /**
@@ -56,6 +58,8 @@ public class SecurityConfig {
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         ApiKeyAuthFilter apiKeyAuthFilter = new ApiKeyAuthFilter(configuredApiKey);
 
+        boolean authDisabled = configuredApiKey == null || configuredApiKey.isBlank();
+
         http
                 .cors(cors -> cors.configurationSource(corsConfigurationSource()))
                 .csrf(csrf -> csrf.disable())
@@ -66,14 +70,18 @@ public class SecurityConfig {
                         .frameOptions(frame -> frame.deny())
                         .cacheControl(cache -> cache.disable())
                 )
-                .authorizeHttpRequests(auth -> auth
-                        .requestMatchers(PERMIT_ALL_PATHS).permitAll()
-                        .anyRequest().authenticated()
-                )
+                .authorizeHttpRequests(auth -> {
+                    if (authDisabled) {
+                        auth.anyRequest().permitAll();
+                    } else {
+                        auth.requestMatchers(PERMIT_ALL_PATHS).permitAll()
+                                .anyRequest().authenticated();
+                    }
+                })
                 .addFilterBefore(apiKeyAuthFilter, BasicAuthenticationFilter.class);
 
         log.info("SecurityConfig 初始化完成，ApiKeyAuthFilter 已注册（app.api-key={}）",
-                (configuredApiKey == null || configuredApiKey.isBlank()) ? "<未配置，鉴权跳过>" : "***");
+                authDisabled ? "<未配置，鉴权跳过>" : "***");
 
         return http.build();
     }

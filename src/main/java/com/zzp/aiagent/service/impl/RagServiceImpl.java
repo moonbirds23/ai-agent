@@ -21,6 +21,7 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -69,6 +70,15 @@ public class RagServiceImpl implements RagService {
         RagContext ctx = RagContext.empty();
         String originalQuery = request.message();
 
+        // Per-stage timing accumulators
+        long rewriteLatency = 0;
+        long retrieveLatency = 0;
+        long rerankLatency = 0;
+        long packLatency = 0;
+        String retrievalPath = "UNKNOWN";
+        List<Long> candidateIds = List.of();
+        List<Long> selectedIds = List.of();
+
         // Global RAG toggle: when disabled, only Layer 1 (explicit user-specified refs) is honored
         if (!ragProperties.enabled()) {
             if (request.referencePictureIds() != null && !request.referencePictureIds().isEmpty()) {
@@ -78,6 +88,8 @@ public class RagServiceImpl implements RagService {
                 }
             }
             log.info("[RagService] RAG 已全局关闭，仅保留显式参考图: explicit={}", ctx.getExplicitReferences().size());
+            recordTrace(request, ctx, start, originalQuery, rewriteLatency, retrieveLatency,
+                    rerankLatency, packLatency, "DISABLED", candidateIds, selectedIds);
             return ctx;
         }
 
@@ -89,10 +101,16 @@ public class RagServiceImpl implements RagService {
             }
         }
 
-        // Layer 2: RAG 增强检索
+        // Layer 2: RAG 增强检索 (with per-stage timing)
         if ((request.useGalleryRag() == null || request.useGalleryRag())
                 && originalQuery != null && !originalQuery.isBlank()) {
-            layer2Enhance(ctx, request, originalQuery);
+            var layer2Result = layer2Enhance(ctx, request, originalQuery);
+            rewriteLatency = layer2Result.rewriteLatencyMs;
+            retrieveLatency = layer2Result.retrieveLatencyMs;
+            rerankLatency = layer2Result.rerankLatencyMs;
+            retrievalPath = layer2Result.retrievalPath;
+            candidateIds = layer2Result.candidateIds;
+            selectedIds = layer2Result.selectedIds;
         }
 
         // Layer 3: 风格模板降级兜底
@@ -100,11 +118,27 @@ public class RagServiceImpl implements RagService {
 
         // Pack and truncate context (referenceMode trimming + maxContextChars limit)
         if (packer != null && !ctx.isEmpty()) {
+            long packStart = System.currentTimeMillis();
             RagSearchCriteria criteria = (RagSearchCriteria) ctx.getTrace().get("criteria");
             ctx.withPacked(packer.pack(ctx, criteria));
+            packLatency = System.currentTimeMillis() - packStart;
         }
 
         // Trace
+        recordTrace(request, ctx, start, originalQuery, rewriteLatency, retrieveLatency,
+                rerankLatency, packLatency, retrievalPath, candidateIds, selectedIds);
+
+        log.info("[RagService] 上下文构建完成: explicit={}, retrieved={}, template={}",
+                ctx.getExplicitReferences().size(),
+                ctx.getRetrievedReferences().size(),
+                ctx.getStyleTemplate() != null ? ctx.getStyleTemplate().code() : "none");
+        return ctx;
+    }
+
+    private void recordTrace(ChatRequest request, RagContext ctx, long start, String originalQuery,
+                             long rewriteLatency, long retrieveLatency, long rerankLatency,
+                             long packLatency, String retrievalPath,
+                             List<Long> candidateIds, List<Long> selectedIds) {
         if (traceService != null) {
             long latency = System.currentTimeMillis() - start;
             String rewritten = (String) ctx.getTrace().get("rewrittenQuery");
@@ -114,22 +148,30 @@ public class RagServiceImpl implements RagService {
                     ctx.getTrace().get("criteria"),
                     ctx.getTrace().get("candidates"),
                     ctx.getTrace().get("selected"),
-                    templateCode, null, latency, null));
+                    templateCode, null, latency, LocalDateTime.now(),
+                    rewriteLatency, retrieveLatency, rerankLatency, packLatency,
+                    retrievalPath, candidateIds, selectedIds,
+                    candidateIds.size(), selectedIds.size()));
         }
-
-        log.info("[RagService] 上下文构建完成: explicit={}, retrieved={}, template={}",
-                ctx.getExplicitReferences().size(),
-                ctx.getRetrievedReferences().size(),
-                ctx.getStyleTemplate() != null ? ctx.getStyleTemplate().code() : "none");
-        return ctx;
     }
 
     // ── Layer 2: 增强路径 ────────────────────────────────────────────
 
-    private void layer2Enhance(RagContext ctx, ChatRequest request, String originalQuery) {
+    /**
+     * Per-stage timing and ID data returned from Layer 2 operations.
+     */
+    private record Layer2Timing(long rewriteLatencyMs, long retrieveLatencyMs, long rerankLatencyMs,
+                                String retrievalPath,
+                                List<Long> candidateIds, List<Long> selectedIds) {}
+
+    private Layer2Timing layer2Enhance(RagContext ctx, ChatRequest request, String originalQuery) {
+        // Phase 1: Query Rewrite
+        long rewriteStart = System.currentTimeMillis();
         String conversationHistory = buildConversationHistory(request.chatId());
         RagRewriteResult rewrite = rewriteService.rewrite(originalQuery, conversationHistory);
+        long rewriteLatency = System.currentTimeMillis() - rewriteStart;
         ctx.putTrace("rewrittenQuery", rewrite.searchQuery());
+        ctx.putTrace("rewriteLatencyMs", rewriteLatency);
 
         String effectiveMode = resolveReferenceMode(rewrite, request);
         ctx.putTrace("resolvedReferenceMode", effectiveMode);
@@ -148,11 +190,44 @@ public class RagServiceImpl implements RagService {
                 ragProperties.minScore());
         ctx.putTrace("criteria", criteria);
 
+        // Phase 2: Hybrid Retrieval
+        long retrieveStart = System.currentTimeMillis();
         List<RagCandidate> candidates = hybridRetriever.retrieve(criteria);
+        long retrieveLatency = System.currentTimeMillis() - retrieveStart;
         ctx.putTrace("candidates", candidates);
+        ctx.putTrace("retrieveLatencyMs", retrieveLatency);
 
+        // Classify retrieval path
+        String retrievalPath;
+        if (candidates.isEmpty()) {
+            retrievalPath = "EMPTY";
+        } else {
+            boolean hasVector = candidates.stream().anyMatch(c -> c.vectorScore() > 0);
+            boolean hasKeywordFallback = candidates.stream()
+                    .anyMatch(c -> c.reasons().contains("关键词回退"));
+            if (hasKeywordFallback) {
+                retrievalPath = "KEYWORD_FALLBACK";
+            } else {
+                retrievalPath = "VECTOR";
+            }
+        }
+
+        // Phase 3: Rerank
+        long rerankStart = System.currentTimeMillis();
         List<RagCandidate> selected = reranker.rerank(candidates, criteria);
+        long rerankLatency = System.currentTimeMillis() - rerankStart;
         ctx.putTrace("selected", selected);
+        ctx.putTrace("rerankLatencyMs", rerankLatency);
+
+        // Collect picture IDs
+        List<Long> candidateIds = candidates.stream()
+                .map(c -> c.picture().id())
+                .filter(id -> id != null)
+                .toList();
+        List<Long> selectedIds = selected.stream()
+                .map(c -> c.picture().id())
+                .filter(id -> id != null)
+                .toList();
 
         for (RagCandidate c : selected) {
             if (c.picture() != null) {
@@ -174,6 +249,9 @@ public class RagServiceImpl implements RagService {
             selectedSummary.add(item);
         }
         ctx.putTrace("selectedSummary", selectedSummary);
+
+        return new Layer2Timing(rewriteLatency, retrieveLatency, rerankLatency,
+                retrievalPath, candidateIds, selectedIds);
     }
 
     // ── Layer 3 ──────────────────────────────────────────────────────

@@ -21,12 +21,21 @@ public class RagTraceServiceImpl implements RagTraceService {
     @Override
     public void record(RagTrace trace) {
         try {
-            log.info("[RAG-Trace] chatId={} originalQuery=\"{}\" rewritten=\"{}\" template={} latency={}ms promptLen={}",
+            log.info("[RAG-Trace] chatId={} originalQuery=\"{}\" rewritten=\"{}\" template={} "
+                    + "latency={}ms (rewrite={}ms retrieve={}ms rerank={}ms pack={}ms) "
+                    + "path={} candidates={} selected={} promptLen={}",
                     trace.chatId(),
                     truncate(trace.originalQuery(), 80),
                     trace.rewrittenQuery() != null ? truncate(trace.rewrittenQuery(), 80) : "N/A",
                     trace.templateCode() != null ? trace.templateCode() : "none",
                     trace.latencyMs(),
+                    trace.rewriteLatencyMs(),
+                    trace.retrieveLatencyMs(),
+                    trace.rerankLatencyMs(),
+                    trace.packLatencyMs(),
+                    trace.retrievalPath(),
+                    trace.candidateCount(),
+                    trace.selectedCount(),
                     trace.enhancedPrompt() != null ? trace.enhancedPrompt().length() : 0);
 
             if (log.isDebugEnabled()) {
