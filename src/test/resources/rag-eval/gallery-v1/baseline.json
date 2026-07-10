@@ -1,0 +1,858 @@
+{
+  "datasetVersion" : "gallery-v1",
+  "gitCommit" : "5db3074",
+  "embeddingModel" : "embedding-2",
+  "ragConfig" : {
+    "mode" : "fixed-retrieval"
+  },
+  "mode" : "fixed-retrieval",
+  "mcpEnabled" : false,
+  "overall" : {
+    "hitRateAtK" : 0.7777777777777778,
+    "recallAtK" : 0.19414978276766895,
+    "precisionAtK" : 0.5111111111111112,
+    "mrrAtK" : 0.6666666666666666,
+    "ndcgAtK" : 0.4167527002287468,
+    "candidateRecallAtK" : 0.19414978276766895,
+    "selectedRecallAtK" : 0.19414978276766895,
+    "selectedNdcgAtK" : 0.4167527002287468,
+    "rerankGainAtK" : 0.0,
+    "relevantDropRate" : 0.0,
+    "emptyResultAccuracy" : 1.0,
+    "forbiddenResultRate" : 0.1111111111111111,
+    "totalCases" : 10,
+    "successfulCases" : 10,
+    "failedCases" : 0,
+    "k" : 5
+  },
+  "byGroup" : {
+    "分级相关性" : {
+      "hitRateAtK" : 1.0,
+      "recallAtK" : 0.14285714285714285,
+      "precisionAtK" : 0.2,
+      "mrrAtK" : 0.5,
+      "ndcgAtK" : 0.04593913094571233,
+      "candidateRecallAtK" : 0.14285714285714285,
+      "selectedRecallAtK" : 0.14285714285714285,
+      "selectedNdcgAtK" : 0.04593913094571233,
+      "rerankGainAtK" : 0.0,
+      "relevantDropRate" : 0.0,
+      "emptyResultAccuracy" : 0.0,
+      "forbiddenResultRate" : 0.0,
+      "totalCases" : 1,
+      "successfulCases" : 1,
+      "failedCases" : 0,
+      "k" : 5
+    },
+    "排除项" : {
+      "hitRateAtK" : 0.0,
+      "recallAtK" : 0.0,
+      "precisionAtK" : 0.0,
+      "mrrAtK" : 0.0,
+      "ndcgAtK" : 0.0,
+      "candidateRecallAtK" : 0.0,
+      "selectedRecallAtK" : 0.0,
+      "selectedNdcgAtK" : 0.0,
+      "rerankGainAtK" : 0.0,
+      "relevantDropRate" : 0.0,
+      "emptyResultAccuracy" : 0.0,
+      "forbiddenResultRate" : 1.0,
+      "totalCases" : 1,
+      "successfulCases" : 1,
+      "failedCases" : 0,
+      "k" : 5
+    },
+    "检索准确性" : {
+      "hitRateAtK" : 0.8,
+      "recallAtK" : 0.2742857142857143,
+      "precisionAtK" : 0.4800000000000001,
+      "mrrAtK" : 0.7,
+      "ndcgAtK" : 0.5233284987700717,
+      "candidateRecallAtK" : 0.2742857142857143,
+      "selectedRecallAtK" : 0.2742857142857143,
+      "selectedNdcgAtK" : 0.5233284987700717,
+      "rerankGainAtK" : 0.0,
+      "relevantDropRate" : 0.0,
+      "emptyResultAccuracy" : 0.0,
+      "forbiddenResultRate" : 0.0,
+      "totalCases" : 5,
+      "successfulCases" : 5,
+      "failedCases" : 0,
+      "k" : 5
+    },
+    "无结果" : {
+      "hitRateAtK" : 0.0,
+      "recallAtK" : 0.0,
+      "precisionAtK" : 0.0,
+      "mrrAtK" : 0.0,
+      "ndcgAtK" : 0.0,
+      "candidateRecallAtK" : 0.0,
+      "selectedRecallAtK" : 0.0,
+      "selectedNdcgAtK" : 0.0,
+      "rerankGainAtK" : 0.0,
+      "relevantDropRate" : 0.0,
+      "emptyResultAccuracy" : 1.0,
+      "forbiddenResultRate" : 0.0,
+      "totalCases" : 1,
+      "successfulCases" : 1,
+      "failedCases" : 0,
+      "k" : 5
+    },
+    "多相关" : {
+      "hitRateAtK" : 1.0,
+      "recallAtK" : 0.11653116531165311,
+      "precisionAtK" : 1.0,
+      "mrrAtK" : 1.0,
+      "ndcgAtK" : 0.544096338631325,
+      "candidateRecallAtK" : 0.11653116531165311,
+      "selectedRecallAtK" : 0.11653116531165311,
+      "selectedNdcgAtK" : 0.544096338631325,
+      "rerankGainAtK" : 0.0,
+      "relevantDropRate" : 0.0,
+      "emptyResultAccuracy" : 0.0,
+      "forbiddenResultRate" : 0.0,
+      "totalCases" : 2,
+      "successfulCases" : 2,
+      "failedCases" : 0,
+      "k" : 5
+    }
+  },
+  "caseResults" : [ {
+    "caseId" : "case-001",
+    "group" : "检索准确性",
+    "query" : "水墨山水画",
+    "expectedEmpty" : false,
+    "candidateIds" : [ 101, 60, 104, 49, 77 ],
+    "selectedIds" : [ 101, 60, 104, 49, 77 ],
+    "relevantPictures" : [ {
+      "pictureId" : 101,
+      "picHash" : "ee6bdd902f6db0f376e2829ebb5745cbe632befec45559b75bc3104d4a3b5287",
+      "grade" : 3,
+      "relevant" : true,
+      "highlyRelevant" : true
+    }, {
+      "pictureId" : 95,
+      "picHash" : "b660d94e6d7c6a598285c93cb1563ed0067b931f6c939c12f8b64de9ea933d09",
+      "grade" : 3,
+      "relevant" : true,
+      "highlyRelevant" : true
+    }, {
+      "pictureId" : 39,
+      "picHash" : "ef7a3a043ab2bd26859a7b324f7616094c82b55256c233ce1f93a3befc6d99ba",
+      "grade" : 2,
+      "relevant" : true,
+      "highlyRelevant" : false
+    }, {
+      "pictureId" : 60,
+      "picHash" : "d70ca7f4e1f9e8efe187a4d017ec9addf873dbb56a82f3b8bcce16fad915e568",
+      "grade" : 1,
+      "relevant" : true,
+      "highlyRelevant" : false
+    }, {
+      "pictureId" : 104,
+      "picHash" : "a57edd7c9536dcd9df959e5a23b218833837d9f0736668396cbcb7a65e851d05",
+      "grade" : 1,
+      "relevant" : true,
+      "highlyRelevant" : false
+    }, {
+      "pictureId" : 77,
+      "picHash" : "0d8f164a7eab81312c6807aab2dba131a662f09a1ef98b824970b61045422ba3",
+      "grade" : 1,
+      "relevant" : true,
+      "highlyRelevant" : false
+    }, {
+      "pictureId" : 71,
+      "picHash" : "e21e3338417d9b92dbd40b618aaa2f96fcfdcf6eec8a5eb0a31ae553e74dcc38",
+      "grade" : 1,
+      "relevant" : true,
+      "highlyRelevant" : false
+    }, {
+      "pictureId" : 97,
+      "picHash" : "1243c318ca09c90006319a64b443ffb30340265fa52153a9810be2a40b743add",
+      "grade" : 1,
+      "relevant" : true,
+      "highlyRelevant" : false
+    }, {
+      "pictureId" : 58,
+      "picHash" : "fad36c38795f40c4880fd85b624c15ef471f200a8ad11432240d806d1f9f0ee2",
+      "grade" : 1,
+      "relevant" : true,
+      "highlyRelevant" : false
+    }, {
+      "pictureId" : 36,
+      "picHash" : "e7525d0874fc9dce728e3678ed92e0c11663b7fef821a8df7a8c478277148b2e",
+      "grade" : 1,
+      "relevant" : true,
+      "highlyRelevant" : false
+    }, {
+      "pictureId" : 69,
+      "picHash" : "2f0ff07600f5a45575356fc009c88021c31b8d3471649585f3a515c5ae5a370c",
+      "grade" : 1,
+      "relevant" : true,
+      "highlyRelevant" : false
+    }, {
+      "pictureId" : 94,
+      "picHash" : "d0fba00b601512c15062e91164e178ebb0d02df65b34694b3ffbbe94882e94fa",
+      "grade" : 1,
+      "relevant" : true,
+      "highlyRelevant" : false
+    }, {
+      "pictureId" : 127,
+      "picHash" : "f663f93bf82322a9a18f80326c4258e5e2c463c549d4fe8d84709b3222d09bfc",
+      "grade" : 1,
+      "relevant" : true,
+      "highlyRelevant" : false
+    }, {
+      "pictureId" : 63,
+      "picHash" : "111db9bd9ae8ad31c591199e0e6373635299f44b1d8305606267132fa73c2805",
+      "grade" : 1,
+      "relevant" : true,
+      "highlyRelevant" : false
+    } ],
+    "mustNotReturn" : [ ],
+    "success" : true,
+    "errorMessage" : null
+  }, {
+    "caseId" : "case-002",
+    "group" : "检索准确性",
+    "query" : "卡通风格",
+    "expectedEmpty" : false,
+    "candidateIds" : [ 134, 135, 63, 104, 55, 36, 121, 34, 71, 116, 45, 72, 100, 101, 43, 82, 73, 93, 79, 62, 30, 94, 118, 102, 108, 46, 86, 40, 35, 133, 49, 107, 120, 87, 81, 89, 98, 117, 103, 47, 132, 56 ],
+    "selectedIds" : [ 134, 135, 63, 104, 55, 36, 121, 34, 71, 116, 45, 72, 100, 101, 43, 82, 73, 93, 79, 62, 30, 94, 118, 102, 108, 46, 86, 40, 35, 133, 49, 107, 120, 87, 81, 89, 98, 117, 103, 47, 132, 56 ],
+    "relevantPictures" : [ {
+      "pictureId" : 134,
+      "picHash" : "5ae4682398344851b25e9dd72555df4d0a856bf586093438a783b3986dac5483",
+      "grade" : 3,
+      "relevant" : true,
+      "highlyRelevant" : true
+    }, {
+      "pictureId" : 104,
+      "picHash" : "a57edd7c9536dcd9df959e5a23b218833837d9f0736668396cbcb7a65e851d05",
+      "grade" : 1,
+      "relevant" : true,
+      "highlyRelevant" : false
+    }, {
+      "pictureId" : 121,
+      "picHash" : "00757bc6b31ea8fd98e564dcbc02873d9c71a07edbdead7e064ef6082cc308fc",
+      "grade" : 1,
+      "relevant" : true,
+      "highlyRelevant" : false
+    }, {
+      "pictureId" : 71,
+      "picHash" : "e21e3338417d9b92dbd40b618aaa2f96fcfdcf6eec8a5eb0a31ae553e74dcc38",
+      "grade" : 1,
+      "relevant" : true,
+      "highlyRelevant" : false
+    }, {
+      "pictureId" : 116,
+      "picHash" : "c41350c4287e314d8f676b96c7e58f1a9b07c8d4fe400aafac932e7adbf52c60",
+      "grade" : 1,
+      "relevant" : true,
+      "highlyRelevant" : false
+    }, {
+      "pictureId" : 118,
+      "picHash" : "f152ce9da123bcbfdde81ab7331b62c0eb63756e0f1310951b756c58d6933508",
+      "grade" : 1,
+      "relevant" : true,
+      "highlyRelevant" : false
+    }, {
+      "pictureId" : 86,
+      "picHash" : "5076573dd60fbe7fd5d7486614247b172bc88ed443ba2b4e4c22671a52ea35a1",
+      "grade" : 1,
+      "relevant" : true,
+      "highlyRelevant" : false
+    } ],
+    "mustNotReturn" : [ ],
+    "success" : true,
+    "errorMessage" : null
+  }, {
+    "caseId" : "case-003",
+    "group" : "检索准确性",
+    "query" : "商务演示",
+    "expectedEmpty" : false,
+    "candidateIds" : [ ],
+    "selectedIds" : [ ],
+    "relevantPictures" : [ {
+      "pictureId" : 41,
+      "picHash" : "2f00582bdad0a911013cf7b8fa76ed4bf3e8591f04b67b96fa4c08aa7da97cc6",
+      "grade" : 2,
+      "relevant" : true,
+      "highlyRelevant" : false
+    }, {
+      "pictureId" : 70,
+      "picHash" : "c151c63724849d9f1915a565b56b6e5e82bf2047c83edc4638e910d8acf88bd5",
+      "grade" : 2,
+      "relevant" : true,
+      "highlyRelevant" : false
+    }, {
+      "pictureId" : 75,
+      "picHash" : "1a9762ea61efbc99265371db6cfa0cb26d4c23080f67e2cb5b8844421b327f88",
+      "grade" : 2,
+      "relevant" : true,
+      "highlyRelevant" : false
+    }, {
+      "pictureId" : 96,
+      "picHash" : "30f534429853813c819c9ca6dc452b53b73e559359cf42dccee479ee30ea7b8b",
+      "grade" : 1,
+      "relevant" : true,
+      "highlyRelevant" : false
+    }, {
+      "pictureId" : 45,
+      "picHash" : "a941ec7a3721742ba8a033a1158292d357ac9de0e914c2040ebd3b162d60f586",
+      "grade" : 1,
+      "relevant" : true,
+      "highlyRelevant" : false
+    }, {
+      "pictureId" : 57,
+      "picHash" : "3687d7fbf1425f4d4ac0610ffa685ec5425f0bdbecf6077cd492b5b3e4197618",
+      "grade" : 1,
+      "relevant" : true,
+      "highlyRelevant" : false
+    }, {
+      "pictureId" : 79,
+      "picHash" : "f7979aabd5ea6c25aa9d802b27754068d33e47ae96cfd619b83d20de0d22e100",
+      "grade" : 1,
+      "relevant" : true,
+      "highlyRelevant" : false
+    } ],
+    "mustNotReturn" : [ ],
+    "success" : true,
+    "errorMessage" : null
+  }, {
+    "caseId" : "case-004",
+    "group" : "检索准确性",
+    "query" : "夜景城市霓虹灯",
+    "expectedEmpty" : false,
+    "candidateIds" : [ 59, 82, 133, 34, 135, 84, 98, 103, 72, 89, 42, 109, 68, 73, 45, 107, 46 ],
+    "selectedIds" : [ 59, 82, 133, 34, 135, 84, 98, 103, 72, 89, 42, 109, 68, 73, 45, 107, 46 ],
+    "relevantPictures" : [ {
+      "pictureId" : 135,
+      "picHash" : "bf40894386a98f4eb730b0ca2fa838ea010591c3777217e194931d9987b08720",
+      "grade" : 3,
+      "relevant" : true,
+      "highlyRelevant" : true
+    }, {
+      "pictureId" : 84,
+      "picHash" : "d469aa7100bbb3c4bc15093493f5e19b070f65fbd140c19a7781d8b5a4113f95",
+      "grade" : 3,
+      "relevant" : true,
+      "highlyRelevant" : true
+    }, {
+      "pictureId" : 82,
+      "picHash" : "c3867b2c670d813e3fd9d5f6e9b109de782e86d4143020cce10b0aa240361dc2",
+      "grade" : 2,
+      "relevant" : true,
+      "highlyRelevant" : false
+    }, {
+      "pictureId" : 34,
+      "picHash" : "4155c2c805145bb0df471c18672e674443707b14816bb333d2f56785670ed8b9",
+      "grade" : 2,
+      "relevant" : true,
+      "highlyRelevant" : false
+    }, {
+      "pictureId" : 89,
+      "picHash" : "a564c96c783f5dd53ee3ade4ab6515024443392873ba6e0c361731a9e70e8d6f",
+      "grade" : 2,
+      "relevant" : true,
+      "highlyRelevant" : false
+    }, {
+      "pictureId" : 73,
+      "picHash" : "4e535024a6e82c782be28bec021839cc16dcfe546c5455fdcd78410a6a854167",
+      "grade" : 1,
+      "relevant" : true,
+      "highlyRelevant" : false
+    } ],
+    "mustNotReturn" : [ ],
+    "success" : true,
+    "errorMessage" : null
+  }, {
+    "caseId" : "case-005",
+    "group" : "检索准确性",
+    "query" : "花卉插画",
+    "expectedEmpty" : false,
+    "candidateIds" : [ 105, 60, 116, 55, 102, 101, 44, 104, 90, 106 ],
+    "selectedIds" : [ 105, 60, 116, 55, 102, 101, 44, 104, 90, 106 ],
+    "relevantPictures" : [ {
+      "pictureId" : 105,
+      "picHash" : "3fac7e39b01b92ae8a489a242fc41e8cf5efa4f827782db03bb9289677e4d6db",
+      "grade" : 3,
+      "relevant" : true,
+      "highlyRelevant" : true
+    }, {
+      "pictureId" : 60,
+      "picHash" : "d70ca7f4e1f9e8efe187a4d017ec9addf873dbb56a82f3b8bcce16fad915e568",
+      "grade" : 2,
+      "relevant" : true,
+      "highlyRelevant" : false
+    }, {
+      "pictureId" : 102,
+      "picHash" : "d740a816b6c492acaeb9efc101243ee11a8e879246e02ac5466b1feea396a29d",
+      "grade" : 2,
+      "relevant" : true,
+      "highlyRelevant" : false
+    }, {
+      "pictureId" : 44,
+      "picHash" : "5acd9f9a23748f0283d287bb0a0d79e9e37492f6977142af8b61c68237ee5a9d",
+      "grade" : 2,
+      "relevant" : true,
+      "highlyRelevant" : false
+    }, {
+      "pictureId" : 78,
+      "picHash" : "ac20b77f36e0f9892a3b5f59c0e9fabdb5e576e9a583efdbd415b3e4ca2de215",
+      "grade" : 2,
+      "relevant" : true,
+      "highlyRelevant" : false
+    }, {
+      "pictureId" : 91,
+      "picHash" : "32dfb0a83e4739b3b43966a20f5c8fba3e65b9ba9b1fa057d5ab3a98f53f7a1f",
+      "grade" : 2,
+      "relevant" : true,
+      "highlyRelevant" : false
+    }, {
+      "pictureId" : 90,
+      "picHash" : "4692b44e3cab80117dc8ef1fad8426a6052b6875d5a2a8f5b2bd6f62113f0e16",
+      "grade" : 1,
+      "relevant" : true,
+      "highlyRelevant" : false
+    }, {
+      "pictureId" : 92,
+      "picHash" : "1f2fe6da82aad388b790050d218dd1057665b4a7323f7bda5b56bf63a65e91d7",
+      "grade" : 1,
+      "relevant" : true,
+      "highlyRelevant" : false
+    }, {
+      "pictureId" : 81,
+      "picHash" : "4e7f3a78f397b481a796559fe74d099489e7558ed4dd5f5b7c44c7efa981e1c8",
+      "grade" : 1,
+      "relevant" : true,
+      "highlyRelevant" : false
+    }, {
+      "pictureId" : 40,
+      "picHash" : "a80548cb1db7be669a68413b987691e9142a8b37e1aa23b5364ab9ad16131fea",
+      "grade" : 1,
+      "relevant" : true,
+      "highlyRelevant" : false
+    } ],
+    "mustNotReturn" : [ ],
+    "success" : true,
+    "errorMessage" : null
+  }, {
+    "caseId" : "case-006",
+    "group" : "多相关",
+    "query" : "中国风画作",
+    "expectedEmpty" : false,
+    "candidateIds" : [ 104 ],
+    "selectedIds" : [ 104 ],
+    "relevantPictures" : [ {
+      "pictureId" : 101,
+      "picHash" : "ee6bdd902f6db0f376e2829ebb5745cbe632befec45559b75bc3104d4a3b5287",
+      "grade" : 3,
+      "relevant" : true,
+      "highlyRelevant" : true
+    }, {
+      "pictureId" : 104,
+      "picHash" : "a57edd7c9536dcd9df959e5a23b218833837d9f0736668396cbcb7a65e851d05",
+      "grade" : 2,
+      "relevant" : true,
+      "highlyRelevant" : false
+    }, {
+      "pictureId" : 108,
+      "picHash" : "9b80467cffc239a9110057d6fc28f09cc2448dd2146be69b925b71e1e8cc2a6f",
+      "grade" : 2,
+      "relevant" : true,
+      "highlyRelevant" : false
+    }, {
+      "pictureId" : 105,
+      "picHash" : "3fac7e39b01b92ae8a489a242fc41e8cf5efa4f827782db03bb9289677e4d6db",
+      "grade" : 2,
+      "relevant" : true,
+      "highlyRelevant" : false
+    }, {
+      "pictureId" : 45,
+      "picHash" : "a941ec7a3721742ba8a033a1158292d357ac9de0e914c2040ebd3b162d60f586",
+      "grade" : 2,
+      "relevant" : true,
+      "highlyRelevant" : false
+    }, {
+      "pictureId" : 102,
+      "picHash" : "d740a816b6c492acaeb9efc101243ee11a8e879246e02ac5466b1feea396a29d",
+      "grade" : 1,
+      "relevant" : true,
+      "highlyRelevant" : false
+    }, {
+      "pictureId" : 71,
+      "picHash" : "e21e3338417d9b92dbd40b618aaa2f96fcfdcf6eec8a5eb0a31ae553e74dcc38",
+      "grade" : 1,
+      "relevant" : true,
+      "highlyRelevant" : false
+    }, {
+      "pictureId" : 60,
+      "picHash" : "d70ca7f4e1f9e8efe187a4d017ec9addf873dbb56a82f3b8bcce16fad915e568",
+      "grade" : 1,
+      "relevant" : true,
+      "highlyRelevant" : false
+    }, {
+      "pictureId" : 97,
+      "picHash" : "1243c318ca09c90006319a64b443ffb30340265fa52153a9810be2a40b743add",
+      "grade" : 1,
+      "relevant" : true,
+      "highlyRelevant" : false
+    } ],
+    "mustNotReturn" : [ ],
+    "success" : true,
+    "errorMessage" : null
+  }, {
+    "caseId" : "case-007",
+    "group" : "无结果",
+    "query" : "xylophone musical instrument",
+    "expectedEmpty" : true,
+    "candidateIds" : [ ],
+    "selectedIds" : [ ],
+    "relevantPictures" : [ {
+      "pictureId" : 52,
+      "picHash" : "49eab8b91c933ac3bc438113790d2072445fff03b3e2b3e275190f90f488c5c5",
+      "grade" : 2,
+      "relevant" : true,
+      "highlyRelevant" : false
+    } ],
+    "mustNotReturn" : [ 52 ],
+    "success" : true,
+    "errorMessage" : null
+  }, {
+    "caseId" : "case-008",
+    "group" : "排除项",
+    "query" : "卡通动物",
+    "expectedEmpty" : false,
+    "candidateIds" : [ 121, 134, 118, 120, 117 ],
+    "selectedIds" : [ 121, 134, 118, 120, 117 ],
+    "relevantPictures" : [ {
+      "pictureId" : 2,
+      "picHash" : "b2c3d4e5f6a7b2c3d4e5f6a7b2c3d4e5",
+      "grade" : 3,
+      "relevant" : true,
+      "highlyRelevant" : true
+    } ],
+    "mustNotReturn" : [ 121, 134, 118, 120, 117, 116, 119, 64, 100, 86, 71, 115, 81 ],
+    "success" : true,
+    "errorMessage" : null
+  }, {
+    "caseId" : "case-009",
+    "group" : "多相关",
+    "query" : "自然风景",
+    "expectedEmpty" : false,
+    "candidateIds" : [ 97, 37, 101, 127, 58, 67, 77, 69, 99, 76, 39, 105, 31, 32, 126, 50, 110, 106, 115, 38, 95, 60, 33, 107, 125, 40, 29, 54, 93, 71, 132, 36, 47, 55, 62, 72, 130, 124, 64, 113, 123, 68, 90, 85, 104, 34, 114, 128, 63 ],
+    "selectedIds" : [ 97, 37, 101, 127, 58, 67, 77, 69, 99, 76, 39, 105, 31, 32, 126, 50, 110, 106, 115, 38, 95, 60, 33, 107, 125, 40, 29, 54, 93, 71, 132, 36, 47, 55, 62, 72, 130, 124, 64, 113, 123, 68, 90, 85, 104, 34, 114, 128, 63 ],
+    "relevantPictures" : [ {
+      "pictureId" : 97,
+      "picHash" : "1243c318ca09c90006319a64b443ffb30340265fa52153a9810be2a40b743add",
+      "grade" : 3,
+      "relevant" : true,
+      "highlyRelevant" : true
+    }, {
+      "pictureId" : 37,
+      "picHash" : "a5613b2c4423cee3766ea485310d8330fd8fd3dcfdd4c27633a2bcd9d2beb5f9",
+      "grade" : 3,
+      "relevant" : true,
+      "highlyRelevant" : true
+    }, {
+      "pictureId" : 127,
+      "picHash" : "f663f93bf82322a9a18f80326c4258e5e2c463c549d4fe8d84709b3222d09bfc",
+      "grade" : 3,
+      "relevant" : true,
+      "highlyRelevant" : true
+    }, {
+      "pictureId" : 58,
+      "picHash" : "fad36c38795f40c4880fd85b624c15ef471f200a8ad11432240d806d1f9f0ee2",
+      "grade" : 3,
+      "relevant" : true,
+      "highlyRelevant" : true
+    }, {
+      "pictureId" : 67,
+      "picHash" : "04934397522582ca6712ef0e61663403fb0e36c32e4ce3614d5c985350bc8f17",
+      "grade" : 3,
+      "relevant" : true,
+      "highlyRelevant" : true
+    }, {
+      "pictureId" : 77,
+      "picHash" : "0d8f164a7eab81312c6807aab2dba131a662f09a1ef98b824970b61045422ba3",
+      "grade" : 3,
+      "relevant" : true,
+      "highlyRelevant" : true
+    }, {
+      "pictureId" : 69,
+      "picHash" : "2f0ff07600f5a45575356fc009c88021c31b8d3471649585f3a515c5ae5a370c",
+      "grade" : 3,
+      "relevant" : true,
+      "highlyRelevant" : true
+    }, {
+      "pictureId" : 99,
+      "picHash" : "71846d404e230b92575c31f5e9320191d1fd75f0364b31fa3be330719efdc72f",
+      "grade" : 3,
+      "relevant" : true,
+      "highlyRelevant" : true
+    }, {
+      "pictureId" : 76,
+      "picHash" : "1b918dfbdd98b80b0a57843f8cf4fe98d820740e02223ff68d3f1746f58ba73c",
+      "grade" : 3,
+      "relevant" : true,
+      "highlyRelevant" : true
+    }, {
+      "pictureId" : 39,
+      "picHash" : "ef7a3a043ab2bd26859a7b324f7616094c82b55256c233ce1f93a3befc6d99ba",
+      "grade" : 3,
+      "relevant" : true,
+      "highlyRelevant" : true
+    }, {
+      "pictureId" : 31,
+      "picHash" : "3e0b75d26efdeac090ea9fb72e6aafc12bd338774b5f27cb8cb8dcf372ff21ea",
+      "grade" : 3,
+      "relevant" : true,
+      "highlyRelevant" : true
+    }, {
+      "pictureId" : 32,
+      "picHash" : "3b0eb45867531a0f817438599af0cf4907dd193690bf474bb8c5f2055ce729e4",
+      "grade" : 3,
+      "relevant" : true,
+      "highlyRelevant" : true
+    }, {
+      "pictureId" : 50,
+      "picHash" : "d1a606009662600b9917640908265cffe4a90221d7f3a051aedbc39d5c499d84",
+      "grade" : 3,
+      "relevant" : true,
+      "highlyRelevant" : true
+    }, {
+      "pictureId" : 110,
+      "picHash" : "d265009ca62388508ddaafe2c74fba13dbbcd5ef34705cad82d22d39cfb0ea12",
+      "grade" : 3,
+      "relevant" : true,
+      "highlyRelevant" : true
+    }, {
+      "pictureId" : 33,
+      "picHash" : "67495577969b971edc68e2702c4fbb397d0794cc2a0b914c65cf225c3818423d",
+      "grade" : 3,
+      "relevant" : true,
+      "highlyRelevant" : true
+    }, {
+      "pictureId" : 125,
+      "picHash" : "2104879e20584a75a82cec63fec6766bd396b414436f459444ea96c89c4a2275",
+      "grade" : 3,
+      "relevant" : true,
+      "highlyRelevant" : true
+    }, {
+      "pictureId" : 29,
+      "picHash" : "5c546dd5684c128c713cae901105be759fc2c52b03c238011135b6d592a9cfd0",
+      "grade" : 3,
+      "relevant" : true,
+      "highlyRelevant" : true
+    }, {
+      "pictureId" : 36,
+      "picHash" : "e7525d0874fc9dce728e3678ed92e0c11663b7fef821a8df7a8c478277148b2e",
+      "grade" : 3,
+      "relevant" : true,
+      "highlyRelevant" : true
+    }, {
+      "pictureId" : 47,
+      "picHash" : "5ed6cbe73751f0704a25eaec4330658c25d315464edb97f89ef1d2341bc63771",
+      "grade" : 3,
+      "relevant" : true,
+      "highlyRelevant" : true
+    }, {
+      "pictureId" : 130,
+      "picHash" : "0867bc9e6e85b5bfb173622a21abb958cd952ef2e35374a92625c9c08aefbc2a",
+      "grade" : 3,
+      "relevant" : true,
+      "highlyRelevant" : true
+    }, {
+      "pictureId" : 124,
+      "picHash" : "08c23df946f3faf1234c014259c00327e4f8fe771c4e3bf29da130087a30557c",
+      "grade" : 3,
+      "relevant" : true,
+      "highlyRelevant" : true
+    }, {
+      "pictureId" : 123,
+      "picHash" : "de1bb204f10f93497fe3929a3422b6241c9e05c2917c042a117c8d08e6ad1998",
+      "grade" : 3,
+      "relevant" : true,
+      "highlyRelevant" : true
+    }, {
+      "pictureId" : 68,
+      "picHash" : "5655ef01f6a1c7dce367b0033df3070aa405463cdcdaa8eeda305e8ddb694e48",
+      "grade" : 3,
+      "relevant" : true,
+      "highlyRelevant" : true
+    }, {
+      "pictureId" : 114,
+      "picHash" : "387e44dd3858ed9ff17dca9ae38fb8af00268333422fca8b200e8076ee82cc2b",
+      "grade" : 3,
+      "relevant" : true,
+      "highlyRelevant" : true
+    }, {
+      "pictureId" : 128,
+      "picHash" : "e86857a500aeccef0a3659d554d4f982a7f9e69d6e8a2b5bcf28782a425e2413",
+      "grade" : 3,
+      "relevant" : true,
+      "highlyRelevant" : true
+    }, {
+      "pictureId" : 38,
+      "picHash" : "234d0f1beaddfecc9b419b638efb824df8f4c74c5cedd530263a1a68fcae7343",
+      "grade" : 2,
+      "relevant" : true,
+      "highlyRelevant" : false
+    }, {
+      "pictureId" : 95,
+      "picHash" : "b660d94e6d7c6a598285c93cb1563ed0067b931f6c939c12f8b64de9ea933d09",
+      "grade" : 2,
+      "relevant" : true,
+      "highlyRelevant" : false
+    }, {
+      "pictureId" : 60,
+      "picHash" : "d70ca7f4e1f9e8efe187a4d017ec9addf873dbb56a82f3b8bcce16fad915e568",
+      "grade" : 2,
+      "relevant" : true,
+      "highlyRelevant" : false
+    }, {
+      "pictureId" : 40,
+      "picHash" : "a80548cb1db7be669a68413b987691e9142a8b37e1aa23b5364ab9ad16131fea",
+      "grade" : 2,
+      "relevant" : true,
+      "highlyRelevant" : false
+    }, {
+      "pictureId" : 54,
+      "picHash" : "9e3d0d7a43d4d8d54a5d4e7fc4b63f0b2b8a0612fef4ca1438e0cdb1ae97dbeb",
+      "grade" : 2,
+      "relevant" : true,
+      "highlyRelevant" : false
+    }, {
+      "pictureId" : 93,
+      "picHash" : "0c9027d82b71be40ff2d5151fda59c7e3a95f00361c09d72234c66324958cdd3",
+      "grade" : 2,
+      "relevant" : true,
+      "highlyRelevant" : false
+    }, {
+      "pictureId" : 132,
+      "picHash" : "9849f0546c60b4a5ace72eff6d28a56049fcf916b145f10bfc8b06f62c98194e",
+      "grade" : 2,
+      "relevant" : true,
+      "highlyRelevant" : false
+    }, {
+      "pictureId" : 62,
+      "picHash" : "a1b7cba90dd16eab0e5808e3668f3f1a4b54acb4d8990b8465ce4b1d973b09e3",
+      "grade" : 2,
+      "relevant" : true,
+      "highlyRelevant" : false
+    }, {
+      "pictureId" : 113,
+      "picHash" : "dec2989525cc303b181b7e2ebe506659c3d82a1200a63386c763fbb5d9f0016a",
+      "grade" : 2,
+      "relevant" : true,
+      "highlyRelevant" : false
+    }, {
+      "pictureId" : 90,
+      "picHash" : "4692b44e3cab80117dc8ef1fad8426a6052b6875d5a2a8f5b2bd6f62113f0e16",
+      "grade" : 2,
+      "relevant" : true,
+      "highlyRelevant" : false
+    }, {
+      "pictureId" : 101,
+      "picHash" : "ee6bdd902f6db0f376e2829ebb5745cbe632befec45559b75bc3104d4a3b5287",
+      "grade" : 1,
+      "relevant" : true,
+      "highlyRelevant" : false
+    }, {
+      "pictureId" : 126,
+      "picHash" : "0dffee8b469bca22a65f7fb2559e16d320ece469e2102404ca2859deee0b70ad",
+      "grade" : 1,
+      "relevant" : true,
+      "highlyRelevant" : false
+    }, {
+      "pictureId" : 55,
+      "picHash" : "d0712f30a77af273810dadc9ce6ecadd67f214fdfccca5fa17284ef60b17fa2b",
+      "grade" : 1,
+      "relevant" : true,
+      "highlyRelevant" : false
+    }, {
+      "pictureId" : 72,
+      "picHash" : "cbd2a54f6e55b27772d35dc9bcf754e79629dd4106cabc1d512aa8d50ca040e4",
+      "grade" : 1,
+      "relevant" : true,
+      "highlyRelevant" : false
+    }, {
+      "pictureId" : 34,
+      "picHash" : "4155c2c805145bb0df471c18672e674443707b14816bb333d2f56785670ed8b9",
+      "grade" : 1,
+      "relevant" : true,
+      "highlyRelevant" : false
+    }, {
+      "pictureId" : 63,
+      "picHash" : "111db9bd9ae8ad31c591199e0e6373635299f44b1d8305606267132fa73c2805",
+      "grade" : 1,
+      "relevant" : true,
+      "highlyRelevant" : false
+    } ],
+    "mustNotReturn" : [ ],
+    "success" : true,
+    "errorMessage" : null
+  }, {
+    "caseId" : "case-010",
+    "group" : "分级相关性",
+    "query" : "现代科技风格设计",
+    "expectedEmpty" : false,
+    "candidateIds" : [ 98, 42, 103, 108, 100, 61, 70, 41, 133, 102, 56, 104 ],
+    "selectedIds" : [ 98, 42, 103, 108, 100, 61, 70, 41, 133, 102, 56, 104 ],
+    "relevantPictures" : [ {
+      "pictureId" : 133,
+      "picHash" : "e6b07842caa63c772a08bc2c094c7a6bd74bf1c8d35fad6823be1c5c3bedb666",
+      "grade" : 3,
+      "relevant" : true,
+      "highlyRelevant" : true
+    }, {
+      "pictureId" : 135,
+      "picHash" : "bf40894386a98f4eb730b0ca2fa838ea010591c3777217e194931d9987b08720",
+      "grade" : 3,
+      "relevant" : true,
+      "highlyRelevant" : true
+    }, {
+      "pictureId" : 61,
+      "picHash" : "773a8e70f5d202bc23863b7e2327dc72f57e17508db421a0d38ae9137c775132",
+      "grade" : 2,
+      "relevant" : true,
+      "highlyRelevant" : false
+    }, {
+      "pictureId" : 42,
+      "picHash" : "433bb326a86828dcb0b86bccb8e05cbeeb984ad6d409109b2fcd1ea9eaad1042",
+      "grade" : 1,
+      "relevant" : true,
+      "highlyRelevant" : false
+    }, {
+      "pictureId" : 34,
+      "picHash" : "4155c2c805145bb0df471c18672e674443707b14816bb333d2f56785670ed8b9",
+      "grade" : 1,
+      "relevant" : true,
+      "highlyRelevant" : false
+    }, {
+      "pictureId" : 73,
+      "picHash" : "4e535024a6e82c782be28bec021839cc16dcfe546c5455fdcd78410a6a854167",
+      "grade" : 1,
+      "relevant" : true,
+      "highlyRelevant" : false
+    }, {
+      "pictureId" : 89,
+      "picHash" : "a564c96c783f5dd53ee3ade4ab6515024443392873ba6e0c361731a9e70e8d6f",
+      "grade" : 1,
+      "relevant" : true,
+      "highlyRelevant" : false
+    } ],
+    "mustNotReturn" : [ ],
+    "success" : true,
+    "errorMessage" : null
+  } ],
+  "failedCases" : [ ],
+  "latencyStats" : {
+    "avgLatencyMs" : 0.0,
+    "p50LatencyMs" : 0.0,
+    "p95LatencyMs" : 0.0,
+    "p99LatencyMs" : 0.0,
+    "minLatencyMs" : 0.0,
+    "maxLatencyMs" : 0.0
+  }
+}
