@@ -6,11 +6,12 @@
   <img src="https://img.shields.io/badge/Spring%20AI-1.0.0-blue?logo=spring" alt="Spring AI 1.0">
   <img src="https://img.shields.io/badge/PostgreSQL-16-336791?logo=postgresql" alt="PG 16">
   <img src="https://img.shields.io/badge/Redis-7-DC382D?logo=redis" alt="Redis 7">
-  <img src="https://img.shields.io/badge/tests-189%20passed-success" alt="189 tests">
+  <img src="https://img.shields.io/badge/tests-254%20passed-success" alt="254 tests">
+  <img src="https://img.shields.io/badge/MCP-1.0.0-purple?logo=anthropic" alt="MCP">
   <a href="https://github.com/moonbirds23/ai-agent/actions"><img src="https://github.com/moonbirds23/ai-agent/actions/workflows/build.yml/badge.svg" alt="Build"></a>
 </p>
 
-**基于 Spring AI 的多模态 AI Agent，实现对话式图片生成、图库管理与检索增强。** 全链路接入智谱 GLM 大模型（GLM-4-Flash / GLM-4.5V / CogView-4 / Embedding-2），支持流式 SSE 响应、LLM 驱动的任务规划与 WorkflowEngine 工作流引擎、三层 RAG 检索增强、PGVector 语义检索。
+**基于 Spring AI 的多模态 AI Agent，实现对话式图片生成、图库管理与检索增强。** 全链路接入智谱 GLM 大模型（GLM-4-Flash / GLM-4.5V / CogView-4 / Embedding-2），支持流式 SSE 响应、LLM 驱动的任务规划与 WorkflowEngine 工作流引擎、三层 RAG 检索增强、MCP 工具协议、PGVector 语义检索及 RAG 评测体系。
 
 
 ---
@@ -60,6 +61,51 @@
 | **Layer 1** | 用户显式选择参考图（≤3 张） | `ExplicitReferenceResolver` — 图库元数据 + AI 画像 |
 | **Layer 2** | 自动混合检索 | Query 改写 → PGVector 语义检索 + 关键词匹配 + 元数据加权 → 重排序 → 上下文压缩 |
 | **Layer 3** | 风格模板兜底 | 10 套预设模板关键词自动匹配 |
+
+### RAG 评测体系
+
+基于 10 条人工标注 Query（0~3 分级相关性）的检索质量评价框架。
+
+| 能力 | 说明 |
+|------|------|
+| **数据集** | 102 张图片 corpus manifest + cases.jsonl（含 relevantPictures / mustNotReturn / expectedEmpty） |
+| **标注方法** | 候选池法——合并向量检索 + 关键词检索结果，人工逐张标注 3（高度相关）/2（相关）/1（弱相关）/0（不相关） |
+| **指标** | HitRate@5 / Recall@5 / Precision@5 / MRR@5 / nDCG@5 / CandidateRecall@20 / RerankGain / RelevantDropRate / EmptyResultAccuracy / ForbiddenResultRate |
+| **运行模式** | fixed-retrieval（跳过 LLM 改写，消除随机性）/ rewrite-only / end-to-end |
+| **回归门禁** | HitRate@5 不降超 1 个 case / Recall@5 不降超 0.02 / nDCG@5 不降超 0.02 / RelevantDropRate 不升高 |
+| **当前 baseline** | HitRate@5=0.78, Recall@5=0.19, MRR@5=0.67, nDCG@5=0.42, EmptyAcc=1.00 |
+
+```bash
+# 运行评测
+JAVA_HOME="D:/develop/java/JDK/jdk-21" mvn -Dtest=RagEvaluationIT -Drag.eval.enabled=true test
+```
+
+### MCP 工具协议
+
+将 Pexels 图片搜索和图库候选召回能力抽为独立 MCP Server，主应用作为 MCP Client 通过 Gateway 消费。
+
+```
+IMAGE_RETRIEVAL_MODE=local → PexelsSearchTools → PexelsPhotoService → Pexels API
+IMAGE_RETRIEVAL_MODE=mcp   → PexelsSearchTools → ImageRetrievalGateway
+                               → McpToolInvoker → McpSyncClient
+                                 → MCP Server (:8232) → Pexels API
+```
+
+| 组件 | 位置 | 职责 |
+|------|------|------|
+| **MCP Server** | `mcp-servers/image-retrieval-server/` | 独立 Spring Boot 进程，暴露 Pexels 搜索/精选/详情 3 个 `@Tool` |
+| **McpToolInvoker** | `integration/mcp/` | 封装 McpSyncClient.callTool()，错误转 BusinessException |
+| **ImageRetrievalGateway** | `integration/mcp/` | 接口 + local/mcp 双实现，`@ConditionalOnProperty` 切换 |
+| **Resilience4j** | `application.yml` | 熔断 + 重试保护 MCP 调用链路 |
+| **协议测试** | 22 个测试 | 假 HTTP Server 模拟 Pexels，不依赖真实 API |
+
+```bash
+# 启动 MCP Server
+mvn -f mcp-servers/image-retrieval-server/pom.xml spring-boot:run
+
+# 主应用切 MCP 模式
+IMAGE_RETRIEVAL_MODE=mcp mvn spring-boot:run -Dspring-boot.run.profiles=local
+```
 
 ### 对话记忆管理
 
@@ -168,6 +214,7 @@ JAVA_HOME="D:/develop/java/JDK/jdk-21" mvn test
 | **缓存** | Redis 7 | Lettuce + Commons Pool2 | 会话记忆 · 限流 · 缓存 |
 | **迁移** | Flyway | — | 数据库版本管理（7 个迁移脚本） |
 | **容错** | Resilience4j | 2.3.0 | 熔断 + 重试（智谱 API） |
+| **协议** | MCP | 1.0.0 | 独立 MCP Server + Client Gateway + 假 HTTP 测试 |
 | **文档** | SpringDoc OpenAPI | 2.8.13 | API 文档 / Swagger UI |
 | **容器** | Docker + Compose | — | 容器化部署编排 |
 | **CI** | GitHub Actions | — | 自动化测试 |
@@ -209,11 +256,18 @@ src/main/java/com/zzp/aiagent
 ├── profile/                       # 图片 AI 画像
 ├── rag/                           # RAG 检索增强
 │   └── enhanc/                    # 增强链路（QueryRewrite · HybridRetrieve · Rerank · ContextPack）
+├── integration/mcp/               # MCP Client 适配层（Gateway · McpToolInvoker · 配置切换）
 ├── service/                       # 服务层
 ├── storage/                       # 对象存储抽象（Local/COS）
 ├── template/                      # 风格模板
 ├── tool/                          # 工具集（GalleryAgent · PexelsSearch · ToolProgress）
 └── vector/                        # 向量索引抽象（PgVectorIndexService）
+
+mcp-servers/image-retrieval-server/   # 独立 MCP Server 子项目
+├── pom.xml                            # 端口 8232，禁用 Flyway
+├── tool/PexelsTools.java              # Pexels 3 工具 @Tool 暴露
+├── contract/                          # 版本化 MCP DTO（schemaVersion/requestId）
+└── pexels/                            # RestClient 实现 + 异常处理
 ```
 
 ---
