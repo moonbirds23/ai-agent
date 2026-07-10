@@ -5,6 +5,8 @@ import com.zzp.aiagent.domain.pexels.PexelsPhoto;
 import com.zzp.aiagent.domain.pexels.PexelsPhotoService;
 import com.zzp.aiagent.domain.pexels.PexelsPhotoSrc;
 import com.zzp.aiagent.domain.pexels.PexelsSearchResult;
+import com.zzp.aiagent.integration.mcp.ImageRetrievalGateway;
+import com.zzp.aiagent.integration.mcp.McpIntegrationProperties;
 import com.zzp.aiagent.service.GalleryService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -52,6 +54,11 @@ class PexelsSearchToolsTest {
     @Mock
     private TaskLedger taskLedger;
 
+    @Mock
+    private ImageRetrievalGateway imageRetrievalGateway;
+
+    private McpIntegrationProperties mcpProperties;
+
     private PexelsSearchTools tools;
 
     private static PexelsPhoto samplePhoto(long id, String alt, String color) {
@@ -78,7 +85,9 @@ class PexelsSearchToolsTest {
 
     @BeforeEach
     void setUp() {
-        tools = new PexelsSearchTools(pexelsPhotoService, galleryService, progressContext, taskLedger);
+        mcpProperties = new McpIntegrationProperties("local");
+        tools = new PexelsSearchTools(pexelsPhotoService, galleryService, progressContext,
+                taskLedger, imageRetrievalGateway, mcpProperties);
     }
 
     // ── pexelsSearchPhotos ─────────────────────────────────────────
@@ -103,7 +112,6 @@ class PexelsSearchToolsTest {
             String output = tools.pexelsSearchPhotos("test", null, null, null, 2, null);
 
             assertThat(output).contains("Pexels 搜索「test」");
-            assertThat(output).contains("50 张图片");
             assertThat(output).contains("[Pexels ID:100]");
             assertThat(output).contains("Sunset over mountains");
             assertThat(output).contains("#FF6600");

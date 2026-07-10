@@ -1,11 +1,11 @@
 package com.zzp.aiagent.tool;
 
+import com.zzp.aiagent.agent.task.TaskLedger;
+import com.zzp.aiagent.agent.task.ToolExecutionRecord;
 import com.zzp.aiagent.domain.gallery.GalleryUploadRequest;
-import com.zzp.aiagent.domain.pexels.PexelsPhoto;
 import com.zzp.aiagent.domain.pexels.PexelsPhotoService;
-import com.zzp.aiagent.domain.pexels.PexelsPhotoSrc;
-import com.zzp.aiagent.domain.pexels.PexelsSearchRequest;
-import com.zzp.aiagent.domain.pexels.PexelsSearchResult;
+import com.zzp.aiagent.integration.mcp.ImageRetrievalGateway;
+import com.zzp.aiagent.integration.mcp.McpIntegrationProperties;
 import com.zzp.aiagent.model.entity.GalleryPicture;
 import com.zzp.aiagent.model.enums.StorageLocation;
 import com.zzp.aiagent.model.vo.ImageCandidateVO;
@@ -21,11 +21,7 @@ import org.springframework.stereotype.Component;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
-
-import com.zzp.aiagent.agent.task.TaskLedger;
-import com.zzp.aiagent.agent.task.ToolExecutionRecord;
 
 /**
  * Pexels stock photo search tools for AI Agent.
@@ -46,15 +42,21 @@ public class PexelsSearchTools {
     private final GalleryService galleryService;
     private final ToolProgressContext progressContext;
     private final TaskLedger taskLedger;
+    private final ImageRetrievalGateway imageRetrievalGateway;
+    private final McpIntegrationProperties mcpProperties;
 
     public PexelsSearchTools(PexelsPhotoService pexelsPhotoService,
                              GalleryService galleryService,
                              ToolProgressContext progressContext,
-                             TaskLedger taskLedger) {
+                             TaskLedger taskLedger,
+                             ImageRetrievalGateway imageRetrievalGateway,
+                             McpIntegrationProperties mcpProperties) {
         this.pexelsPhotoService = pexelsPhotoService;
         this.galleryService = galleryService;
         this.progressContext = progressContext;
         this.taskLedger = taskLedger;
+        this.imageRetrievalGateway = imageRetrievalGateway;
+        this.mcpProperties = mcpProperties;
     }
 
     // ── 搜索参考图（不入库）───────────────────────────────────────────
@@ -92,11 +94,19 @@ public class PexelsSearchTools {
         taskLedger.beforeCall(turnId, "pexelsSearchPhotos", input);
 
         try {
-            PexelsSearchRequest request = new PexelsSearchRequest(
-                    query, perPage, 1, orientation, size, color, "zh-CN");
-            PexelsSearchResult result = pexelsPhotoService.search(request);
+            List<Map<String, Object>> photos;
+            if (mcpProperties.isMcpMode()) {
+                photos = imageRetrievalGateway.searchPexels(query, perPage, 1);
+            } else {
+                photos = pexelsPhotoService.search(
+                        new com.zzp.aiagent.domain.pexels.PexelsSearchRequest(
+                                query, perPage, 1, orientation, size, color, "zh-CN"))
+                        .photos().stream()
+                        .map(PexelsSearchTools::toPhotoMap)
+                        .toList();
+            }
 
-            if (result.photos().isEmpty()) {
+            if (photos.isEmpty()) {
                 taskLedger.recordSuccess(turnId, "pexelsSearchPhotos", input, Map.of("candidateCount", 0), ToolExecutionRecord.NONE);
                 progressContext.done(toolContext, "pexelsSearchPhotos",
                         "Pexels 未找到与「" + query + "」相关的图片");
@@ -104,7 +114,7 @@ public class PexelsSearchTools {
             }
 
             // Push to frontend via image_candidates event
-            List<ImageCandidateVO> candidates = result.photos().stream()
+            List<ImageCandidateVO> candidates = photos.stream()
                     .map(PexelsSearchTools::toCandidateVO)
                     .toList();
             progressContext.imageCandidates(toolContext,
@@ -112,27 +122,15 @@ public class PexelsSearchTools {
 
             // Return text summary for the Agent
             StringBuilder sb = new StringBuilder("Pexels 搜索「").append(query)
-                    .append("」找到 ").append(result.totalResults()).append(" 张图片，")
-                    .append("返回前 ").append(result.photos().size()).append(" 张：\n");
-            for (int i = 0; i < result.photos().size(); i++) {
-                PexelsPhoto p = result.photos().get(i);
-                sb.append(i + 1).append(". [Pexels ID:").append(p.id()).append("] ");
-                if (p.alt() != null && !p.alt().isBlank()) {
-                    sb.append(p.alt());
-                } else {
-                    sb.append(p.photographer()).append(" 作品");
-                }
-                if (p.avgColor() != null && !p.avgColor().isBlank()) {
-                    sb.append(" | 主色调 ").append(p.avgColor());
-                }
-                sb.append(" | 尺寸 ").append(p.width()).append("×").append(p.height());
-                sb.append(" | © ").append(p.photographer());
-                sb.append("\n");
+                    .append("」找到 ").append(photos.size()).append(" 张图片：\n");
+            for (int i = 0; i < photos.size(); i++) {
+                Map<String, Object> p = photos.get(i);
+                appendPhotoSummary(sb, i + 1, p);
             }
 
             progressContext.done(toolContext, "pexelsSearchPhotos",
-                    "已找到 " + result.photos().size() + " 张 Pexels 图片");
-            Map<String, Object> output = Map.of("candidateCount", result.photos().size(), "totalResults", result.totalResults());
+                    "已找到 " + photos.size() + " 张 Pexels 图片");
+            Map<String, Object> output = Map.of("candidateCount", photos.size());
             taskLedger.recordSuccess(turnId, "pexelsSearchPhotos", input, output, ToolExecutionRecord.IMAGE_CANDIDATES_RETURNED);
             return sb.toString();
 
@@ -165,36 +163,38 @@ public class PexelsSearchTools {
         taskLedger.beforeCall(turnId, "pexelsCuratedPhotos", input);
 
         try {
-            PexelsSearchResult result = pexelsPhotoService.curated(perPage, 1);
+            List<Map<String, Object>> photos;
+            if (mcpProperties.isMcpMode()) {
+                photos = imageRetrievalGateway.curatedPexels(perPage, 1);
+            } else {
+                photos = pexelsPhotoService.curated(perPage, 1)
+                        .photos().stream()
+                        .map(PexelsSearchTools::toPhotoMap)
+                        .toList();
+            }
 
-            if (result.photos().isEmpty()) {
+            if (photos.isEmpty()) {
                 taskLedger.recordSuccess(turnId, "pexelsCuratedPhotos", input, Map.of("candidateCount", 0), ToolExecutionRecord.NONE);
                 progressContext.done(toolContext, "pexelsCuratedPhotos", "Pexels 暂无精选照片");
                 return "Pexels 暂无精选照片，请稍后再试。";
             }
 
-            List<ImageCandidateVO> candidates = result.photos().stream()
+            List<ImageCandidateVO> candidates = photos.stream()
                     .map(PexelsSearchTools::toCandidateVO)
                     .toList();
             progressContext.imageCandidates(toolContext,
                     new ImageCandidatesEventVO("curated", "pexels", candidates));
 
             StringBuilder sb = new StringBuilder("Pexels 精选照片（")
-                    .append(result.photos().size()).append(" 张）：\n");
-            for (int i = 0; i < result.photos().size(); i++) {
-                PexelsPhoto p = result.photos().get(i);
-                sb.append(i + 1).append(". [ID:").append(p.id()).append("] ");
-                sb.append(p.alt() != null && !p.alt().isBlank() ? p.alt() : "无标题");
-                sb.append(" | © ").append(p.photographer());
-                if (p.avgColor() != null && !p.avgColor().isBlank()) {
-                    sb.append(" | ").append(p.avgColor());
-                }
-                sb.append("\n");
+                    .append(photos.size()).append(" 张）：\n");
+            for (int i = 0; i < photos.size(); i++) {
+                Map<String, Object> p = photos.get(i);
+                appendPhotoSummaryBrief(sb, i + 1, p);
             }
 
             progressContext.done(toolContext, "pexelsCuratedPhotos",
-                    "已浏览 " + result.photos().size() + " 张精选照片");
-            taskLedger.recordSuccess(turnId, "pexelsCuratedPhotos", input, Map.of("candidateCount", result.photos().size()), ToolExecutionRecord.IMAGE_CANDIDATES_RETURNED);
+                    "已浏览 " + photos.size() + " 张精选照片");
+            taskLedger.recordSuccess(turnId, "pexelsCuratedPhotos", input, Map.of("candidateCount", photos.size()), ToolExecutionRecord.IMAGE_CANDIDATES_RETURNED);
             return sb.toString();
 
         } catch (Exception e) {
@@ -240,11 +240,19 @@ public class PexelsSearchTools {
         taskLedger.beforeCall(turnId, "pexelsSearchAndImport", input);
 
         try {
-            PexelsSearchRequest request = new PexelsSearchRequest(
-                    query, searchLimit, 1, orientation, size, color, "zh-CN");
-            PexelsSearchResult result = pexelsPhotoService.search(request);
+            List<Map<String, Object>> photos;
+            if (mcpProperties.isMcpMode()) {
+                photos = imageRetrievalGateway.searchPexels(query, searchLimit, 1);
+            } else {
+                photos = pexelsPhotoService.search(
+                        new com.zzp.aiagent.domain.pexels.PexelsSearchRequest(
+                                query, searchLimit, 1, orientation, size, color, "zh-CN"))
+                        .photos().stream()
+                        .map(PexelsSearchTools::toPhotoMap)
+                        .toList();
+            }
 
-            if (result.photos().isEmpty()) {
+            if (photos.isEmpty()) {
                 taskLedger.recordSuccess(turnId, "pexelsSearchAndImport", input, Map.of("savedCount", 0), ToolExecutionRecord.NONE);
                 progressContext.done(toolContext, "pexelsSearchAndImport",
                         "Pexels 未找到与「" + query + "」相关的图片");
@@ -252,27 +260,30 @@ public class PexelsSearchTools {
             }
 
             progressContext.progress(toolContext,
-                    "找到 " + result.photos().size() + " 张 Pexels 候选，开始下载");
+                    "找到 " + photos.size() + " 张 Pexels 候选，开始下载");
 
             List<String> saved = new ArrayList<>();
-            for (PexelsPhoto photo : result.photos()) {
+            for (Map<String, Object> photo : photos) {
                 if (saved.size() >= n) break;
                 try {
                     progressContext.progress(toolContext,
                             "正在下载第 " + (saved.size() + 1) + "/" + n + " 张图片");
-                    String downloadUrl = pickDownloadUrl(photo.src());
+                    String downloadUrl = pickDownloadUrl(photo);
                     byte[] bytes = pexelsPhotoService.downloadPhoto(downloadUrl);
                     String base64 = Base64.getEncoder().encodeToString(bytes);
-                    String picName = sanitizeName(photo.alt());
+                    String alt = stringVal(photo, "alt");
+                    String picName = sanitizeName(alt);
+                    String photoUrl = stringVal(photo, "url");
                     GalleryUploadRequest uploadReq = new GalleryUploadRequest(
-                            base64, picName, photo.url(),
+                            base64, picName, photoUrl,
                             SOURCE_PEXELS, List.of(query), null, StorageLocation.MAIN);
                     GalleryPicture savedPic = galleryService.upload(uploadReq);
                     saved.add("[ID:" + savedPic.id() + "] " + savedPic.name());
                     progressContext.progress(toolContext,
                             "已保存第 " + saved.size() + " 张图片到图库 [ID:" + savedPic.id() + "]");
                 } catch (Exception e) {
-                    log.debug("[PexelsTools] 下载图片失败 photoId={}: {}", photo.id(), e.getMessage());
+                    Object photoId = photo.get("id");
+                    log.debug("[PexelsTools] 下载图片失败 photoId={}: {}", photoId, e.getMessage());
                 }
             }
 
@@ -323,30 +334,40 @@ public class PexelsSearchTools {
         taskLedger.beforeCall(turnId, "pexelsGetPhoto", input);
 
         try {
-            PexelsPhoto photo = pexelsPhotoService.getPhoto(photoId);
-
-            StringBuilder sb = new StringBuilder("Pexels 照片详情 [ID:").append(photo.id()).append("]\n");
-            if (photo.alt() != null && !photo.alt().isBlank()) {
-                sb.append("描述：").append(photo.alt()).append("\n");
-            }
-            sb.append("摄影师：").append(photo.photographer()).append("\n");
-            sb.append("摄影师主页：").append(photo.photographerUrl()).append("\n");
-            sb.append("Pexels 页面：").append(photo.url()).append("\n");
-            sb.append("尺寸：").append(photo.width()).append("×").append(photo.height()).append("\n");
-            if (photo.avgColor() != null && !photo.avgColor().isBlank()) {
-                sb.append("主色调：").append(photo.avgColor()).append("\n");
+            Map<String, Object> photo;
+            if (mcpProperties.isMcpMode()) {
+                photo = imageRetrievalGateway.getPexelsPhoto(photoId.intValue());
+            } else {
+                photo = toPhotoMap(pexelsPhotoService.getPhoto(photoId));
             }
 
-            PexelsPhotoSrc src = photo.src();
+            if (photo.isEmpty()) {
+                taskLedger.recordSuccess(turnId, "pexelsGetPhoto", input, Map.of(), ToolExecutionRecord.NONE);
+                progressContext.done(toolContext, "pexelsGetPhoto",
+                        "Pexels 照片详情获取失败：未找到该照片");
+                return "Pexels 未找到 ID 为 " + photoId + " 的照片。";
+            }
+
+            long id = longVal(photo, "id");
+            StringBuilder sb = new StringBuilder("Pexels 照片详情 [ID:").append(id).append("]\n");
+            appendField(sb, "描述", stringVal(photo, "alt"));
+            appendField(sb, "摄影师", stringVal(photo, "photographer"));
+            appendField(sb, "摄影师主页", stringVal(photo, "photographerUrl"));
+            appendField(sb, "Pexels 页面", stringVal(photo, "url"));
+            sb.append("尺寸：").append(intVal(photo, "width")).append("×").append(intVal(photo, "height")).append("\n");
+            appendField(sb, "主色调", stringVal(photo, "avgColor"));
+
+            @SuppressWarnings("unchecked")
+            Map<String, Object> src = (Map<String, Object>) photo.get("src");
             sb.append("\n可用尺寸：\n");
-            appendUrl(sb, "原图", src.original());
-            appendUrl(sb, "大图 2x", src.large2x());
-            appendUrl(sb, "大图", src.large());
-            appendUrl(sb, "中图", src.medium());
-            appendUrl(sb, "小图", src.small());
-            appendUrl(sb, "竖版裁剪", src.portrait());
-            appendUrl(sb, "横版裁剪", src.landscape());
-            appendUrl(sb, "缩略图", src.tiny());
+            appendUrl(sb, "原图", stringVal(src, "original"));
+            appendUrl(sb, "大图 2x", stringVal(src, "large2x"));
+            appendUrl(sb, "大图", stringVal(src, "large"));
+            appendUrl(sb, "中图", stringVal(src, "medium"));
+            appendUrl(sb, "小图", stringVal(src, "small"));
+            appendUrl(sb, "竖版裁剪", stringVal(src, "portrait"));
+            appendUrl(sb, "横版裁剪", stringVal(src, "landscape"));
+            appendUrl(sb, "缩略图", stringVal(src, "tiny"));
 
             progressContext.done(toolContext, "pexelsGetPhoto",
                     "Pexels 照片详情已获取 ID:" + photoId);
@@ -361,37 +382,123 @@ public class PexelsSearchTools {
         }
     }
 
-    // ── Helpers ─────────────────────────────────────────────────────
+    // ── Helpers (Map-based, works for both local and MCP photo data) ─
 
-    private static ImageCandidateVO toCandidateVO(PexelsPhoto photo) {
-        String displayUrl = photo.src().medium() != null && !photo.src().medium().isBlank()
-                ? photo.src().medium()
-                : photo.src().large();
+    /**
+     * Convert a PexelsPhoto domain object to a Map for unified processing.
+     */
+    static Map<String, Object> toPhotoMap(com.zzp.aiagent.domain.pexels.PexelsPhoto photo) {
+        Map<String, Object> map = new java.util.LinkedHashMap<>();
+        map.put("id", photo.id());
+        map.put("width", photo.width());
+        map.put("height", photo.height());
+        map.put("alt", photo.alt());
+        map.put("photographer", photo.photographer());
+        map.put("photographerUrl", photo.photographerUrl());
+        map.put("url", photo.url());
+        map.put("avgColor", photo.avgColor());
+        if (photo.src() != null) {
+            Map<String, String> smap = new java.util.LinkedHashMap<>();
+            smap.put("original", photo.src().original());
+            smap.put("large2x", photo.src().large2x());
+            smap.put("large", photo.src().large());
+            smap.put("medium", photo.src().medium());
+            smap.put("small", photo.src().small());
+            smap.put("portrait", photo.src().portrait());
+            smap.put("landscape", photo.src().landscape());
+            smap.put("tiny", photo.src().tiny());
+            map.put("src", smap);
+        }
+        return map;
+    }
+
+    private static ImageCandidateVO toCandidateVO(Map<String, Object> photo) {
+        @SuppressWarnings("unchecked")
+        Map<String, Object> src = (Map<String, Object>) photo.get("src");
+        String displayUrl;
+        if (src != null) {
+            String medium = stringVal(src, "medium");
+            String large = stringVal(src, "large");
+            displayUrl = !medium.isBlank() ? medium : large;
+        } else {
+            displayUrl = "";
+        }
+        String alt = stringVal(photo, "alt");
+        String photographer = stringVal(photo, "photographer");
         return new ImageCandidateVO(
-                photo.alt() != null && !photo.alt().isBlank()
-                        ? photo.alt()
-                        : photo.photographer() + " 作品",
+                !alt.isBlank() ? alt : photographer + " 作品",
                 displayUrl,
-                photo.url(),
+                stringVal(photo, "url"),
                 "pexels",
-                1.0  // Pexels results are uniformly high quality
+                1.0
         );
     }
 
+    private static void appendPhotoSummary(StringBuilder sb, int index, Map<String, Object> p) {
+        sb.append(index).append(". [Pexels ID:").append(longVal(p, "id")).append("] ");
+        String alt = stringVal(p, "alt");
+        if (!alt.isBlank()) {
+            sb.append(alt);
+        } else {
+            sb.append(stringVal(p, "photographer")).append(" 作品");
+        }
+        String avgColor = stringVal(p, "avgColor");
+        if (!avgColor.isBlank()) {
+            sb.append(" | 主色调 ").append(avgColor);
+        }
+        sb.append(" | 尺寸 ").append(intVal(p, "width")).append("×").append(intVal(p, "height"));
+        sb.append(" | © ").append(stringVal(p, "photographer"));
+        sb.append("\n");
+    }
+
+    private static void appendPhotoSummaryBrief(StringBuilder sb, int index, Map<String, Object> p) {
+        sb.append(index).append(". [ID:").append(longVal(p, "id")).append("] ");
+        String alt = stringVal(p, "alt");
+        sb.append(!alt.isBlank() ? alt : "无标题");
+        sb.append(" | © ").append(stringVal(p, "photographer"));
+        String avgColor = stringVal(p, "avgColor");
+        if (!avgColor.isBlank()) {
+            sb.append(" | ").append(avgColor);
+        }
+        sb.append("\n");
+    }
+
     /**
-     * Pick the best download URL: original > large2x > large > medium.
+     * Pick the best download URL from photo map: original > large2x > large > medium.
      */
-    public static String pickDownloadUrl(PexelsPhotoSrc src) {
+    static String pickDownloadUrl(Map<String, Object> photo) {
+        @SuppressWarnings("unchecked")
+        Map<String, Object> src = (Map<String, Object>) photo.get("src");
+        if (src == null) return "";
+        String[] keys = {"original", "large2x", "large", "medium"};
+        for (String key : keys) {
+            String url = stringVal(src, key);
+            if (!url.isBlank()) return url;
+        }
+        return stringVal(src, "original"); // fallback
+    }
+
+    /**
+     * Pick the best download URL from a PexelsPhotoSrc domain object.
+     * Kept for backward compatibility with existing callers.
+     */
+    public static String pickDownloadUrl(com.zzp.aiagent.domain.pexels.PexelsPhotoSrc src) {
         if (src.original() != null && !src.original().isBlank()) return src.original();
         if (src.large2x() != null && !src.large2x().isBlank()) return src.large2x();
         if (src.large() != null && !src.large().isBlank()) return src.large();
         if (src.medium() != null && !src.medium().isBlank()) return src.medium();
-        return src.original(); // fallback, let it error upstream
+        return src.original() != null ? src.original() : "";
     }
 
     private static void appendUrl(StringBuilder sb, String label, String url) {
         if (url != null && !url.isBlank()) {
             sb.append("  ").append(label).append("：").append(url).append("\n");
+        }
+    }
+
+    private static void appendField(StringBuilder sb, String label, String value) {
+        if (value != null && !value.isBlank()) {
+            sb.append(label).append("：").append(value).append("\n");
         }
     }
 
@@ -410,5 +517,31 @@ public class PexelsSearchTools {
         if (toolContext == null || toolContext.getContext() == null) return null;
         Object value = toolContext.getContext().get("turnId");
         return value instanceof String text ? text : null;
+    }
+
+    // ── Map accessor helpers ─
+
+    private static String stringVal(Map<String, Object> map, String key) {
+        if (map == null) return "";
+        Object v = map.get(key);
+        return v != null ? v.toString() : "";
+    }
+
+    private static long longVal(Map<String, Object> map, String key) {
+        Object v = map != null ? map.get(key) : null;
+        if (v instanceof Number n) return n.longValue();
+        if (v instanceof String s) {
+            try { return Long.parseLong(s); } catch (NumberFormatException ignored) {}
+        }
+        return 0L;
+    }
+
+    private static int intVal(Map<String, Object> map, String key) {
+        Object v = map != null ? map.get(key) : null;
+        if (v instanceof Number n) return n.intValue();
+        if (v instanceof String s) {
+            try { return Integer.parseInt(s); } catch (NumberFormatException ignored) {}
+        }
+        return 0;
     }
 }

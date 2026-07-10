@@ -23,6 +23,18 @@ spring:
         dimensions: 1024
         schema-name: public
         table-name: picture_vector_store
+    mcp:
+      client:
+        enabled: true
+        name: ai-agent-image-retrieval-client
+        version: 1.0.0
+        request-timeout: 20s
+        type: SYNC
+        sse:
+          connections:
+            image-retrieval:
+              url: ${IMAGE_RETRIEVAL_MCP_URL:http://localhost:8232}
+              sse-endpoint: /sse
   data:
     redis:
       host: ${REDIS_HOST:localhost}
@@ -53,6 +65,9 @@ spring:
       add-mappings: false
 
 app:
+  integrations:
+    image-retrieval:
+      mode: ${IMAGE_RETRIEVAL_MODE:local}
   prompt:
     max-system-chars: 1500
     max-task-chars: 1200
@@ -119,6 +134,11 @@ zhipu:
 resilience4j:
   circuitbreaker:
     instances:
+      image-retrieval-mcp:
+        sliding-window-size: 10
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 30s
+        permitted-number-of-calls-in-half-open-state: 3
       zhipu-vision:
         sliding-window-size: 10
         failure-rate-threshold: 50
@@ -134,6 +154,9 @@ resilience4j:
         wait-duration-in-open-state: 30s
   retry:
     instances:
+      image-retrieval-mcp:
+        max-attempts: 2
+        wait-duration: 300ms
       zhipu-vision:
         max-attempts: 3
         wait-duration: 1s
