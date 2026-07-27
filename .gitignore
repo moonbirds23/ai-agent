@@ -34,6 +34,7 @@ build/
 
 ### Local config ###
 application-local.yml
+.env.local
 
 ### Gallery data ###
 gallery-data/
@@ -42,10 +43,19 @@ gallery-data/
 .claude/
 .codex-run/
 
-### Personal docs & notes ###
-docs/*
-!docs/plots/
-!docs/plots/*.png
-mianshiTest.md
-project-note/
+### AI local workspace ###
+.ai/local/
+
+### Local runtime data ###
+/var/*
+!/var/README.md
+
+### Legacy locations (keep new local output under var/) ###
+/data/
+/kb-data/
+/result_pic/
+/tmp/
+/mianshiTest.md
+/project-note/
 /interview-kb/
+/interview-kb.zip

@@ -18,25 +18,25 @@
 
 ## 架构全景
 
-![系统架构图](docs/plots/系统架构图.png)
+![系统架构图](docs/assets/diagrams/系统架构图.png)
 
 > 四层架构：浏览器调试台 → Spring Boot 应用层 → 数据/缓存中间件 → 外部 AI 服务
 
 ### Agent 请求处理全流程
 
-![Agent请求处理](docs/plots/Agent请求处理.png)
+![Agent请求处理](docs/assets/diagrams/Agent请求处理.png)
 
 > 一个用户请求经过的 5 个阶段：预处理 → WorkflowEngine 规划 → 执行器路由 → 步骤执行 → 验收与响应
 
 ### WorkflowEngine 意图路由
 
-![意图路由决策树](docs/plots/意图路由决策树.png)
+![意图路由决策树](docs/assets/diagrams/意图路由决策树.png)
 
 > 11 种意图分类 + 执行器选择策略：规则引擎优先，LLM 规划兜底
 
 ### RAG 检索增强链路
 
-![三层RAG索引增强链路](docs/plots/三层RAG索引增强链路.png)
+![三层RAG索引增强链路](docs/assets/diagrams/三层RAG索引增强链路.png)
 
 > 三层渐进式检索：显式参考图（优先）→ 混合检索增强（自动）→ 风格模板（兜底）
 
