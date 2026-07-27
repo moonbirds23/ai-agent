@@ -18,6 +18,7 @@ import com.zzp.aiagent.agent.task.VerificationResult;
 import com.zzp.aiagent.common.ThrowUtils;
 import com.zzp.aiagent.domain.gallery.GalleryImportUrlRequest;
 import com.zzp.aiagent.domain.gallery.GalleryUploadRequest;
+import com.zzp.aiagent.domain.rag.RagContext;
 import com.zzp.aiagent.exception.BusinessException;
 import com.zzp.aiagent.exception.ErrorCode;
 import com.zzp.aiagent.model.dto.chat.ChatRequest;
@@ -30,11 +31,15 @@ import com.zzp.aiagent.model.vo.ImageGeneratedEventVO;
 import com.zzp.aiagent.model.vo.StreamEventVO;
 import com.zzp.aiagent.memory.MemoryContextBuilder;
 import com.zzp.aiagent.memory.MemoryWriter;
+import com.zzp.aiagent.observability.AgentObservationKeys;
+import com.zzp.aiagent.observability.AgentObservationNames;
+import com.zzp.aiagent.observability.AgentTelemetry;
 import com.zzp.aiagent.service.ChatMediaService;
 import com.zzp.aiagent.service.ChatService;
 import com.zzp.aiagent.service.ConversationLimitService;
 import com.zzp.aiagent.service.GalleryService;
 import com.zzp.aiagent.service.PictureAiProfileService;
+import com.zzp.aiagent.service.RagService;
 import com.zzp.aiagent.tool.CurrentImageContext;
 import com.zzp.aiagent.tool.ToolProgressContext;
 import lombok.extern.slf4j.Slf4j;
@@ -44,15 +49,20 @@ import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.content.Media;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Service;
+import io.micrometer.observation.Observation;
+import io.micrometer.observation.contextpropagation.ObservationThreadLocalAccessor;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Sinks;
+import reactor.core.publisher.SignalType;
 
+import java.time.Duration;
 import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -91,6 +101,9 @@ public class ChatServiceImpl implements ChatService {
     private final MemoryWriter memoryWriter;
     private final TaskPromptBuilder taskPromptBuilder;
     private final PromptBudgetManager promptBudgetManager;
+    private final RagService ragService;
+    private final PromptReferenceAssembler promptReferenceAssembler;
+    private final AgentTelemetry telemetry;
 
     public ChatServiceImpl(GalleryService galleryService,
                            PictureAiProfileService pictureAiProfileService,
@@ -104,7 +117,10 @@ public class ChatServiceImpl implements ChatService {
                            MemoryContextBuilder memoryContextBuilder,
                            MemoryWriter memoryWriter,
                            TaskPromptBuilder taskPromptBuilder,
-                           PromptBudgetManager promptBudgetManager) {
+                           PromptBudgetManager promptBudgetManager,
+                           RagService ragService,
+                           PromptReferenceAssembler promptReferenceAssembler,
+                           AgentTelemetry telemetry) {
         this.galleryService = galleryService;
         this.pictureAiProfileService = pictureAiProfileService;
         this.chatMediaService = chatMediaService;
@@ -118,21 +134,40 @@ public class ChatServiceImpl implements ChatService {
         this.memoryWriter = memoryWriter;
         this.taskPromptBuilder = taskPromptBuilder;
         this.promptBudgetManager = promptBudgetManager;
+        this.ragService = ragService;
+        this.promptReferenceAssembler = promptReferenceAssembler;
+        this.telemetry = telemetry;
     }
 
     // ── 非流式入口 ──────────────────────────────────────────────────
 
     @Override
     public ChatResponseVO chat(ChatRequest request, String chatId) {
+        String turnId = newTurnId(chatId);
+        AgentTelemetry.AgentObservation turn = turnObservation(chatId, turnId);
+        try (Observation.Scope ignored = turn.openScope()) {
+            return chatObserved(request, chatId, turnId, turn);
+        } catch (RuntimeException e) {
+            turn.error(e);
+            turn.lowCardinality(AgentObservationKeys.Low.OUTCOME, "error");
+            throw e;
+        } finally {
+            turn.stop();
+        }
+    }
+
+    private ChatResponseVO chatObserved(ChatRequest request, String chatId, String turnId,
+                                        AgentTelemetry.AgentObservation turn) {
         conversationLimitService.checkLimit(chatId);
         GalleryPicture saved = autoSaveToCacheGallery(request);
-        TaskPlan plan = workflowEngine.plan(request, chatId);
-        String turnId = plan.turnId();
+        TaskPlan plan = workflowEngine.plan(request, chatId, turnId);
+        turn.lowCardinality(AgentObservationKeys.Low.TASK_TYPE,
+                plan.taskType().name().toLowerCase(java.util.Locale.ROOT));
         currentImageContext.bind(turnId, extractImageBase64(request));
 
         try {
             String rawUserText = request.message() != null ? request.message() : "";
-            String executionContext = buildExecutionContext(request, plan);
+            String executionContext = buildExecutionContext(request, plan, chatId);
             Media media = chatMediaService.createMedia(saved, request.imageBase64(), request.imageUrl());
             Map<String, Object> ctx = toolContext(chatId, turnId, request);
             ctx.put("imageBase64", extractImageBase64(request) != null ? extractImageBase64(request) : "");
@@ -142,9 +177,11 @@ public class ChatServiceImpl implements ChatService {
             AgentResult result = workflowEngine.execute(input, plan);
             String response = result.state() == AgentState.ERROR ? result.content() : result.content();
             String effectiveResponse = executePlannedFallbackIfNeeded(plan, turnId, response);
-            String safeResponse = ResponseComposer.composeVerified(effectiveResponse, taskLedger, turnId, recoveryPolicy);
+            String safeResponse = verifyComposeAndRecover(effectiveResponse, turnId);
             VerificationResult verification = taskLedger.getVerification(turnId);
-            writeTrustedMemory(chatId, rawUserText, safeResponse, verification,
+            turn.lowCardinality(AgentObservationKeys.Low.OUTCOME,
+                    result.state() == AgentState.ERROR ? "error" : "success");
+            writeTrustedMemoryObserved(chatId, turnId, rawUserText, safeResponse, verification,
                     request.referencePictureIds());
 
             ImageGeneratedEventVO imageData = toolProgressContext.getGeneratedImage(turnId);
@@ -164,14 +201,52 @@ public class ChatServiceImpl implements ChatService {
 
     @Override
     public Flux<StreamEventVO> chatStream(ChatRequest request, String chatId) {
+        return Flux.defer(() -> {
+            String turnId = newTurnId(chatId);
+            AgentTelemetry.AgentObservation turn = turnObservation(chatId, turnId);
+            long startedNanos = System.nanoTime();
+            AtomicBoolean firstToken = new AtomicBoolean();
+            AtomicBoolean failed = new AtomicBoolean();
+            Flux<StreamEventVO> stream;
+            try (Observation.Scope ignored = turn.openScope()) {
+                stream = chatStreamObserved(request, chatId, turnId, turn, failed);
+            } catch (RuntimeException e) {
+                turn.error(e);
+                turn.lowCardinality(AgentObservationKeys.Low.OUTCOME, "error");
+                turn.stop();
+                return Flux.error(e);
+            }
+            return stream
+                    .doOnNext(event -> {
+                        if ("token".equals(event.type()) && firstToken.compareAndSet(false, true)) {
+                            Duration ttft = Duration.ofNanos(System.nanoTime() - startedNanos);
+                            turn.event("response.first_token");
+                            telemetry.record("agent.response.time.to.first.token", ttft,
+                                    AgentObservationKeys.Low.OUTCOME, "success");
+                        }
+                    })
+                    .doOnError(error -> {
+                        failed.set(true);
+                        turn.error(error);
+                    })
+                    .doFinally(signal -> finishStreamTurn(turn, signal, failed.get()))
+                    .contextWrite(context -> context.put(
+                            ObservationThreadLocalAccessor.KEY, turn.observation()));
+        });
+    }
+
+    private Flux<StreamEventVO> chatStreamObserved(ChatRequest request, String chatId, String turnId,
+                                                    AgentTelemetry.AgentObservation turn,
+                                                    AtomicBoolean failed) {
         conversationLimitService.checkLimit(chatId);
         GalleryPicture saved = autoSaveToCacheGallery(request);
-        TaskPlan plan = workflowEngine.plan(request, chatId);
-        String turnId = plan.turnId();
+        TaskPlan plan = workflowEngine.plan(request, chatId, turnId);
+        turn.lowCardinality(AgentObservationKeys.Low.TASK_TYPE,
+                plan.taskType().name().toLowerCase(java.util.Locale.ROOT));
         currentImageContext.bind(turnId, extractImageBase64(request));
 
         String rawUserText = request.message() != null ? request.message() : "";
-        String executionContext = buildExecutionContext(request, plan);
+        String executionContext = buildExecutionContext(request, plan, chatId);
         Media media = chatMediaService.createMedia(saved, request.imageBase64(), request.imageUrl());
         Map<String, Object> ctx = toolContext(chatId, turnId, request);
         ctx.put("imageBase64", extractImageBase64(request) != null ? extractImageBase64(request) : "");
@@ -185,7 +260,7 @@ public class ChatServiceImpl implements ChatService {
 
         Flux<StreamEventVO> eventFlux = workflowEngine.isManualExecution(plan)
                 ? manualExecutionEvents(executor, input, accumulator, chatId, turnId, plan)
-                : executor.stream(input)
+                : workflowEngine.stream(executor, input, plan)
                 .concatMap(clientResponse -> {
                     Flux<StreamEventVO> events = Flux.empty();
                     ChatResponse cr = clientResponse.chatResponse();
@@ -197,7 +272,9 @@ public class ChatServiceImpl implements ChatService {
                         if (calls != null) {
                             for (var tc : calls) {
                                 String label = toolLabel(tc.name());
-                                log.info("[Stream] 工具调用 chatId={} tool={} args={}", chatId, tc.name(), tc.arguments());
+                                log.info("[Stream] 工具调用 chatId={} tool={} argumentLength={}",
+                                        chatId, tc.name(),
+                                        tc.arguments() != null ? tc.arguments().length() : 0);
                                 events = events.concatWith(
                                         Flux.just(StreamEventVO.toolCall(tc.name(), label, chatId)));
                             }
@@ -217,9 +294,9 @@ public class ChatServiceImpl implements ChatService {
         Flux<StreamEventVO> doneEvent = Flux.defer(() -> {
             String fullText = accumulator.toString();
             String effectiveText = executePlannedFallbackIfNeeded(plan, turnId, fullText);
-            String safeText = ResponseComposer.composeVerified(effectiveText, taskLedger, turnId, recoveryPolicy);
+            String safeText = verifyComposeAndRecover(effectiveText, turnId);
             VerificationResult verification = taskLedger.getVerification(turnId);
-            writeTrustedMemory(chatId, rawUserText, safeText, verification,
+            writeTrustedMemoryObserved(chatId, turnId, rawUserText, safeText, verification,
                     request.referencePictureIds());
             var snapshot = taskLedger.snapshot(turnId, recoveryPolicy);
             List<StreamEventVO> events = new java.util.ArrayList<>();
@@ -246,6 +323,8 @@ public class ChatServiceImpl implements ChatService {
                 mergedEvents,
                 doneEvent
         ).onErrorResume(e -> {
+            failed.set(true);
+            turn.error(e);
             String errorMsg;
             if (e instanceof BusinessException be) {
                 log.warn("[Stream] 业务异常 chatId={} code={}", chatId, be.getCode());
@@ -270,7 +349,7 @@ public class ChatServiceImpl implements ChatService {
                                                        StringBuilder accumulator, String chatId,
                                                        String turnId, TaskPlan plan) {
         return Flux.defer(() -> {
-            AgentResult result = executor.execute(input);
+            AgentResult result = workflowEngine.execute(executor, input, plan);
             String content = result.content() != null ? result.content() : "";
             accumulator.append(content);
 
@@ -292,16 +371,71 @@ public class ChatServiceImpl implements ChatService {
         });
     }
 
-    private String buildExecutionContext(ChatRequest request, TaskPlan plan) {
+    private String buildExecutionContext(ChatRequest request, TaskPlan plan, String chatId) {
         String taskPrompt = promptBudgetManager.trimTask(taskPromptBuilder.build(plan));
-        String referenceContext = promptBudgetManager.trimRag(
-                buildSelectedReferenceContext(request.referencePictureIds()));
+        String referenceContext = promptBudgetManager.trimRag(buildRagContext(request, plan, chatId));
         if (taskPrompt.isBlank()) return referenceContext;
         if (referenceContext.isBlank()) return taskPrompt;
         return taskPrompt + "\n\n" + referenceContext;
     }
 
-    private void writeTrustedMemory(String chatId, String rawUserText, String safeResponse,
+    private String buildRagContext(ChatRequest request, TaskPlan plan, String chatId) {
+        if (!usesGenerationRag(plan)) {
+            return buildSelectedReferenceContext(request.referencePictureIds());
+        }
+        ChatRequest normalized = withChatId(request, chatId);
+        try {
+            RagContext context = ragService.buildContext(normalized);
+            if (context == null || context.isEmpty()) {
+                return "";
+            }
+            return promptReferenceAssembler.assemble("本轮用户需求见后文。", context);
+        } catch (RuntimeException error) {
+            log.warn("[RAG] 上下文构建失败，降级为显式参考图 metadata errorType={}",
+                    error.getClass().getName());
+            return buildSelectedReferenceContext(request.referencePictureIds());
+        }
+    }
+
+    private static boolean usesGenerationRag(TaskPlan plan) {
+        return plan != null && (plan.taskType() == TaskType.IMAGE_GENERATION
+                || plan.taskType() == TaskType.CREATIVE_WORKFLOW);
+    }
+
+    private static ChatRequest withChatId(ChatRequest request, String chatId) {
+        return new ChatRequest(
+                request.message(),
+                chatId,
+                request.generationMode(),
+                request.imageBase64(),
+                request.imageUrl(),
+                request.mode(),
+                request.referencePictureIds(),
+                request.useGalleryRag(),
+                request.referenceMode(),
+                request.styleTemplateCode(),
+                request.saveGeneratedToGallery());
+    }
+
+    private void writeTrustedMemoryObserved(String chatId, String turnId, String rawUserText,
+                                            String safeResponse, VerificationResult verification,
+                                            List<Long> referenceIds) {
+        AgentTelemetry.AgentObservation observation = telemetry.start(AgentObservationNames.MEMORY_WRITE)
+                .highCardinality(AgentObservationKeys.High.CHAT_ID, chatId)
+                .highCardinality(AgentObservationKeys.High.TURN_ID, turnId);
+        try (Observation.Scope ignored = observation.openScope()) {
+            writeTrustedMemoryInternal(chatId, rawUserText, safeResponse, verification, referenceIds);
+            observation.lowCardinality(AgentObservationKeys.Low.OUTCOME,
+                    verification != null && verification.deliverable() ? "written" : "skipped");
+        } catch (RuntimeException e) {
+            observation.error(e);
+            throw e;
+        } finally {
+            observation.stop();
+        }
+    }
+
+    private void writeTrustedMemoryInternal(String chatId, String rawUserText, String safeResponse,
                                     VerificationResult verification, List<Long> referenceIds) {
         memoryWriter.writeVerifiedTurn(chatId, rawUserText, safeResponse, verification);
         if (verification != null && verification.deliverable()
@@ -309,6 +443,71 @@ public class ChatServiceImpl implements ChatService {
             memoryWriter.writeResourceSummary(chatId,
                     "本轮使用图库图片 ID：" + referenceIds);
         }
+    }
+
+    private String verifyComposeAndRecover(String modelResponse, String turnId) {
+        AgentTelemetry.AgentObservation verifier = telemetry.start(AgentObservationNames.VERIFIER)
+                .highCardinality(AgentObservationKeys.High.TURN_ID, turnId);
+        String composed;
+        VerificationResult verification;
+        try (Observation.Scope ignored = verifier.openScope()) {
+            composed = ResponseComposer.composeVerified(modelResponse, taskLedger, turnId);
+            verification = taskLedger.getVerification(turnId);
+            verifier.lowCardinality(AgentObservationKeys.Low.VERIFICATION_STATUS,
+                    verification != null
+                            ? verification.status().name().toLowerCase(java.util.Locale.ROOT)
+                            : "unavailable");
+        } catch (RuntimeException e) {
+            verifier.error(e);
+            throw e;
+        } finally {
+            verifier.stop();
+        }
+        if (verification == null || verification.deliverable()) {
+            return composed;
+        }
+
+        AgentTelemetry.AgentObservation recovery = telemetry.start(AgentObservationNames.RECOVERY)
+                .highCardinality(AgentObservationKeys.High.TURN_ID, turnId);
+        try (Observation.Scope ignored = recovery.openScope()) {
+            var action = recoveryPolicy.decide(
+                    taskLedger.getPlan(turnId), verification, taskLedger.getRecords(turnId));
+            recovery.lowCardinality(AgentObservationKeys.Low.RECOVERY_TYPE,
+                    action.type().name().toLowerCase(java.util.Locale.ROOT));
+            if (action.type() == com.zzp.aiagent.agent.task.RecoveryActionType.NONE
+                    || action.message() == null || action.message().isBlank()) {
+                return composed;
+            }
+            return composed + "\n\n【恢复建议】" + action.message();
+        } catch (RuntimeException e) {
+            recovery.error(e);
+            throw e;
+        } finally {
+            recovery.stop();
+        }
+    }
+
+    private AgentTelemetry.AgentObservation turnObservation(String chatId, String turnId) {
+        return telemetry.start(AgentObservationNames.TURN)
+                .highCardinality(AgentObservationKeys.High.CHAT_ID, chatId)
+                .highCardinality(AgentObservationKeys.High.TURN_ID, turnId);
+    }
+
+    private static String newTurnId(String chatId) {
+        return chatId + ":" + UUID.randomUUID();
+    }
+
+    private static void finishStreamTurn(AgentTelemetry.AgentObservation turn,
+                                         SignalType signal, boolean failed) {
+        if (signal == SignalType.CANCEL) {
+            turn.lowCardinality(AgentObservationKeys.Low.OUTCOME, "cancelled")
+                    .event("stream.cancelled");
+        } else if (failed || signal == SignalType.ON_ERROR) {
+            turn.lowCardinality(AgentObservationKeys.Low.OUTCOME, "error");
+        } else {
+            turn.lowCardinality(AgentObservationKeys.Low.OUTCOME, "success");
+        }
+        turn.stop();
     }
 
     private static ChatResponseVO responseForVerification(String chatId, String text,

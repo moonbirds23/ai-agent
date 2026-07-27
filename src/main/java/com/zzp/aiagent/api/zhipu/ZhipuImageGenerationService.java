@@ -82,14 +82,15 @@ public class ZhipuImageGenerationService implements ImageGenerationService {
             }
 
             String imageUrl = root.path("data").get(0).path("url").asText();
-            log.info("[ZhipuImage] 生图成功 url={}", imageUrl);
+            log.info("[ZhipuImage] 生图成功 urlLength={}", imageUrl.length());
             return new ImageGenerationResult(imageUrl, null, null,
                     Map.of("provider", "zhipu-cogview-4", "size", size));
         } catch (BusinessException e) {
             throw e;
         } catch (HttpStatusCodeException e) {
             String message = extractErrorMessage(e.getResponseBodyAsString());
-            log.warn("[ZhipuImage] API请求失败 status={} message={}", e.getStatusCode(), message);
+            log.warn("[ZhipuImage] API请求失败 status={} errorLength={}",
+                    e.getStatusCode(), message.length());
             int status = e.getStatusCode().value();
             if (status == 429) {
                 throw new BusinessException(ErrorCode.AI_RATE_LIMIT, "AI 服务请求过于频繁");

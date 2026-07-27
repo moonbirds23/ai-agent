@@ -39,7 +39,7 @@ public class PexelsTools {
             PexelsSearchResponse response = pexelsPhotoService.searchPhotos(request);
             return objectMapper.writeValueAsString(response);
         } catch (Exception e) {
-            log.error("pexelsSearchPhotos failed: query={}", query, e);
+            log.error("pexelsSearchPhotos failed: queryLength={}", query != null ? query.length() : 0, e);
             return "{\"error\":\"" + escapeJson(e.getMessage()) + "\"}";
         }
     }

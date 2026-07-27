@@ -5,8 +5,10 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.ApplicationContext;
+import org.springframework.ai.tool.ToolCallbackProvider;
 
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * Integration test verifying Spring context loads successfully
@@ -32,5 +34,18 @@ class McpServerConfigTest {
     void shouldHaveHealthCheckToolBean() {
         Object bean = context.getBean("healthCheckTool");
         assertNotNull(bean);
+    }
+
+    @Test
+    void shouldRegisterAllMcpTools() {
+        ToolCallbackProvider provider = context.getBean(ToolCallbackProvider.class);
+
+        assertThat(provider.getToolCallbacks())
+                .extracting(callback -> callback.getToolDefinition().name())
+                .containsExactlyInAnyOrder(
+                        "pexelsSearchPhotos",
+                        "pexelsCuratedPhotos",
+                        "pexelsGetPhoto",
+                        "healthCheck");
     }
 }

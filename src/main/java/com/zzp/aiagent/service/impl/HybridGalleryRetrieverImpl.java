@@ -54,12 +54,14 @@ public class HybridGalleryRetrieverImpl implements HybridGalleryRetriever {
         try {
             hits = vectorIndexService.search(query, oversample, criteria.minVectorScore());
         } catch (BusinessException e) {
-            log.warn("[Hybrid] 向量检索失败，降级到关键词搜索 query={}: {}", query, e.getMessage());
+            log.warn("[Hybrid] 向量检索失败，降级到关键词搜索 queryLength={}: {}",
+                    query != null ? query.length() : 0, e.getMessage());
             return fallbackToKeyword(criteria);
         }
 
         if (hits.isEmpty()) {
-            log.info("[Hybrid] 无向量匹配结果，回退到关键词搜索 query={}", query);
+            log.info("[Hybrid] 无向量匹配结果，回退到关键词搜索 queryLength={}",
+                    query != null ? query.length() : 0);
             return fallbackToKeyword(criteria);
         }
 
@@ -115,7 +117,8 @@ public class HybridGalleryRetrieverImpl implements HybridGalleryRetriever {
                     vectorScore, List.of()));
         }
 
-        log.info("[Hybrid] 检索完成 query={} hits={} candidates={}", query, hits.size(), candidates.size());
+        log.info("[Hybrid] 检索完成 queryLength={} hits={} candidates={}",
+                query != null ? query.length() : 0, hits.size(), candidates.size());
         return candidates;
     }
 
@@ -145,7 +148,8 @@ public class HybridGalleryRetrieverImpl implements HybridGalleryRetriever {
                             List.of("关键词回退")))
                     .toList();
         } catch (Exception e) {
-            log.warn("[Hybrid] 关键词回退也失败了 query={}: {}", criteria.query(), e.getMessage());
+            log.warn("[Hybrid] 关键词回退也失败了 queryLength={}: {}",
+                    criteria.query() != null ? criteria.query().length() : 0, e.getMessage());
             return List.of();
         }
     }

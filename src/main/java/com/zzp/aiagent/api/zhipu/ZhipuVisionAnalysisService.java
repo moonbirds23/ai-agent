@@ -101,7 +101,7 @@ public class ZhipuVisionAnalysisService implements VisionAnalysisService {
             JsonNode root = mapper.readTree(responseJson);
             if (root.has("error")) {
                 String errMsg = root.path("error").path("message").asText("未知错误");
-                log.warn("[ZhipuVision] API返回错误: {}", errMsg);
+                log.warn("[ZhipuVision] API返回业务错误 errorLength={}", errMsg.length());
                 throw new BusinessException(ErrorCode.IMAGE_ANALYSIS_FAILED, errMsg);
             }
             String content = root.path("choices").path(0).path("message").path("content").asText();
@@ -113,7 +113,8 @@ public class ZhipuVisionAnalysisService implements VisionAnalysisService {
             throw e;
         } catch (HttpStatusCodeException e) {
             String messageText = extractErrorMessage(e.getResponseBodyAsString());
-            log.warn("[ZhipuVision] API请求失败 status={} message={}", e.getStatusCode(), messageText);
+            log.warn("[ZhipuVision] API请求失败 status={} errorLength={}",
+                    e.getStatusCode(), messageText.length());
             int status = e.getStatusCode().value();
             if (status == 429) {
                 throw new BusinessException(ErrorCode.AI_RATE_LIMIT, "AI 服务请求过于频繁");

@@ -5,6 +5,7 @@ import com.zzp.aiagent.domain.pexels.PexelsPhotoService;
 import com.zzp.aiagent.domain.pexels.PexelsPhotoSrc;
 import com.zzp.aiagent.domain.pexels.PexelsSearchRequest;
 import com.zzp.aiagent.domain.pexels.PexelsSearchResult;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
@@ -19,6 +20,11 @@ import java.util.Map;
  */
 @Component
 @Profile("!test")
+@ConditionalOnProperty(
+        prefix = "app.integrations.image-retrieval",
+        name = "mode",
+        havingValue = "local",
+        matchIfMissing = true)
 public class LocalImageRetrievalGateway implements ImageRetrievalGateway {
 
     private final PexelsPhotoService pexelsPhotoService;

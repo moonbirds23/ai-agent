@@ -62,7 +62,12 @@ public class SpringAiAutoToolExecutor implements AgentExecutor {
                         }
                     })
                     .toolContext(input.toolContext() != null ? input.toolContext() : Map.of())
-                    .advisors(spec -> spec.param("chatId", input.chatId()))
+                    .advisors(spec -> {
+                        spec.param("chatId", input.chatId());
+                        if (input.plan() != null) {
+                            spec.param("turnId", input.plan().turnId());
+                        }
+                    })
                     .call()
                     .content();
             return new AgentResult(AgentState.FINISHED, content, null);
@@ -87,7 +92,12 @@ public class SpringAiAutoToolExecutor implements AgentExecutor {
                     }
                 })
                 .toolContext(input.toolContext() != null ? input.toolContext() : Map.of())
-                .advisors(spec -> spec.param("chatId", input.chatId()))
+                .advisors(spec -> {
+                    spec.param("chatId", input.chatId());
+                    if (input.plan() != null) {
+                        spec.param("turnId", input.plan().turnId());
+                    }
+                })
                 .stream()
                 .chatClientResponse()
                 .doOnComplete(() -> log.debug("[AutoExecutor] stream complete chatId={}", input.chatId()))

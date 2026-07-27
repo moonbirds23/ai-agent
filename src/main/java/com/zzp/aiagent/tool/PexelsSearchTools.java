@@ -135,7 +135,7 @@ public class PexelsSearchTools {
             return sb.toString();
 
         } catch (Exception e) {
-            log.error("[PexelsTools] 搜索失败 query={}", query, e);
+            log.error("[PexelsTools] 搜索失败 queryLength={}", query != null ? query.length() : 0, e);
             progressContext.fail(toolContext, "pexelsSearchPhotos", e.getMessage());
             taskLedger.recordFailure(turnId, "pexelsSearchPhotos", input, e.getMessage());
             return "Pexels 图片搜索失败：" + e.getMessage();
@@ -306,7 +306,7 @@ public class PexelsSearchTools {
             return sb.toString();
 
         } catch (Exception e) {
-            log.error("[PexelsTools] 搜索下载失败 query={}", query, e);
+            log.error("[PexelsTools] 搜索下载失败 queryLength={}", query != null ? query.length() : 0, e);
             progressContext.fail(toolContext, "pexelsSearchAndImport", e.getMessage());
             taskLedger.recordFailure(turnId, "pexelsSearchAndImport", input, e.getMessage());
             return "Pexels 图片搜索下载失败：" + e.getMessage();

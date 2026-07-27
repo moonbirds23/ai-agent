@@ -4,6 +4,10 @@
 
 app:
   api-key: ${APP_API_KEY}
+  observability:
+    agent:
+      enabled: ${AGENT_OBSERVABILITY_ENABLED:true}
+      pricing-enabled: ${AGENT_COST_ESTIMATION_ENABLED:true}
   rag:
     enabled: true
   chat-memory:
@@ -65,6 +69,16 @@ springdoc:
 
 # --- Management endpoints ---
 management:
+  tracing:
+    sampling:
+      probability: ${TRACING_SAMPLING_PROBABILITY:0.1}
+  otlp:
+    tracing:
+      endpoint: ${OTEL_TRACES_ENDPOINT:http://jaeger:4318/v1/traces}
+    metrics:
+      export:
+        enabled: ${OTEL_METRICS_EXPORT_ENABLED:false}
+        url: ${OTEL_METRICS_ENDPOINT:http://otel-collector:4318/v1/metrics}
   endpoints:
     web:
       exposure:

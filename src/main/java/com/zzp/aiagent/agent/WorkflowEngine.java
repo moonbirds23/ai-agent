@@ -5,6 +5,7 @@ import com.zzp.aiagent.agent.executor.AgentExecutorRouter;
 import com.zzp.aiagent.agent.executor.AgentInput;
 import com.zzp.aiagent.agent.executor.ManualReactExecutor;
 import com.zzp.aiagent.agent.task.LlmTaskPlanner;
+import com.zzp.aiagent.agent.task.PlanningResult;
 import com.zzp.aiagent.agent.task.RecoveryPolicy;
 import com.zzp.aiagent.agent.task.TaskLedger;
 import com.zzp.aiagent.agent.task.TaskPlan;
@@ -13,6 +14,11 @@ import com.zzp.aiagent.agent.task.TaskStep;
 import com.zzp.aiagent.agent.task.TaskType;
 import com.zzp.aiagent.agent.task.VerificationResult;
 import com.zzp.aiagent.model.dto.chat.ChatRequest;
+import com.zzp.aiagent.observability.AgentObservationKeys;
+import com.zzp.aiagent.observability.AgentObservationNames;
+import com.zzp.aiagent.observability.AgentTelemetry;
+import io.micrometer.observation.Observation;
+import io.micrometer.observation.contextpropagation.ObservationThreadLocalAccessor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClientResponse;
 import org.springframework.context.annotation.Profile;
@@ -59,15 +65,18 @@ public class WorkflowEngine {
     private final AgentExecutorRouter executorRouter;
     private final TaskLedger taskLedger;
     private final RecoveryPolicy recoveryPolicy;
+    private final AgentTelemetry telemetry;
 
     public WorkflowEngine(LlmTaskPlanner taskPlanner,
                           AgentExecutorRouter executorRouter,
                           TaskLedger taskLedger,
-                          RecoveryPolicy recoveryPolicy) {
+                          RecoveryPolicy recoveryPolicy,
+                          AgentTelemetry telemetry) {
         this.taskPlanner = taskPlanner;
         this.executorRouter = executorRouter;
         this.taskLedger = taskLedger;
         this.recoveryPolicy = recoveryPolicy;
+        this.telemetry = telemetry;
     }
 
     /**
@@ -83,12 +92,44 @@ public class WorkflowEngine {
      * @return a fully-initialized plan registered with the ledger
      */
     public TaskPlan plan(ChatRequest request, String chatId) {
-        String turnId = chatId + ":" + UUID.randomUUID();
-        TaskPlan plan = taskPlanner.plan(request, turnId);
-        taskLedger.startPlan(plan);
-        log.info("[WorkflowEngine] plan turnId={} type={} steps={}",
-                turnId, plan.taskType(), plan.steps().size());
-        return plan;
+        return plan(request, chatId, chatId + ":" + UUID.randomUUID());
+    }
+
+    /**
+     * Plans a request using the caller-owned turn ID so tracing can begin before
+     * the planner runs.
+     */
+    public TaskPlan plan(ChatRequest request, String chatId, String turnId) {
+        AgentTelemetry.AgentObservation observation = telemetry.start(AgentObservationNames.PLANNER)
+                .highCardinality(AgentObservationKeys.High.CHAT_ID, chatId)
+                .highCardinality(AgentObservationKeys.High.TURN_ID, turnId);
+        try (Observation.Scope ignored = observation.openScope()) {
+            PlanningResult result = taskPlanner.planWithMetadata(request, turnId);
+            TaskPlan plan = result.plan();
+            observation.lowCardinality(AgentObservationKeys.Low.PLAN_SOURCE,
+                            result.source().name().toLowerCase(java.util.Locale.ROOT))
+                    .lowCardinality(AgentObservationKeys.Low.TASK_TYPE,
+                            plan.taskType().name().toLowerCase(java.util.Locale.ROOT))
+                    .event("plan.generated");
+            if (result.validationFailed()) {
+                observation.event("plan.validation.failed");
+            }
+            if (result.repairAttempted()) {
+                observation.event(result.source() == com.zzp.aiagent.agent.task.PlanSource.REPAIRED
+                        ? "plan.repaired" : "plan.fallback");
+            } else if (result.source() == com.zzp.aiagent.agent.task.PlanSource.RULE_FALLBACK) {
+                observation.event("plan.fallback");
+            }
+            taskLedger.startPlan(plan);
+            log.info("[WorkflowEngine] plan turnId={} type={} steps={}",
+                    turnId, plan.taskType(), plan.steps().size());
+            return plan;
+        } catch (RuntimeException e) {
+            observation.error(e);
+            throw e;
+        } finally {
+            observation.stop();
+        }
     }
 
     /**
@@ -123,9 +164,24 @@ public class WorkflowEngine {
      */
     public AgentResult execute(AgentInput input, TaskPlan plan) {
         AgentExecutor executor = selectExecutor(plan);
+        return execute(executor, input, plan);
+    }
+
+    public AgentResult execute(AgentExecutor executor, AgentInput input, TaskPlan plan) {
         log.info("[WorkflowEngine] execute turnId={} type={} executor={}",
                 plan.turnId(), plan.taskType(), executor.getClass().getSimpleName());
-        return executor.execute(input);
+        AgentTelemetry.AgentObservation observation = executorObservation(executor, plan);
+        try (Observation.Scope ignored = observation.openScope()) {
+            AgentResult result = executor.execute(input);
+            observation.lowCardinality(AgentObservationKeys.Low.OUTCOME,
+                    result.state() == AgentState.ERROR ? "error" : "success");
+            return result;
+        } catch (RuntimeException e) {
+            observation.error(e);
+            throw e;
+        } finally {
+            observation.stop();
+        }
     }
 
     /**
@@ -141,9 +197,45 @@ public class WorkflowEngine {
      */
     public Flux<ChatClientResponse> stream(AgentInput input, TaskPlan plan) {
         AgentExecutor executor = selectExecutor(plan);
+        return stream(executor, input, plan);
+    }
+
+    public Flux<ChatClientResponse> stream(AgentExecutor executor, AgentInput input, TaskPlan plan) {
         log.info("[WorkflowEngine] stream turnId={} type={} executor={}",
                 plan.turnId(), plan.taskType(), executor.getClass().getSimpleName());
-        return executor.stream(input);
+        return Flux.defer(() -> {
+            AgentTelemetry.AgentObservation observation = executorObservation(executor, plan);
+            Flux<ChatClientResponse> stream;
+            try (Observation.Scope ignored = observation.openScope()) {
+                stream = executor.stream(input);
+            } catch (RuntimeException e) {
+                observation.error(e);
+                observation.lowCardinality(AgentObservationKeys.Low.OUTCOME, "error");
+                observation.stop();
+                return Flux.error(e);
+            }
+            return stream
+                    .doOnError(error -> {
+                        observation.error(error);
+                        observation.lowCardinality(AgentObservationKeys.Low.OUTCOME, "error");
+                    })
+                    .doOnComplete(() -> observation.lowCardinality(
+                            AgentObservationKeys.Low.OUTCOME, "success"))
+                    .doOnCancel(() -> observation.lowCardinality(
+                            AgentObservationKeys.Low.OUTCOME, "cancelled"))
+                    .doFinally(signal -> observation.stop())
+                    .contextWrite(context -> context.put(
+                            ObservationThreadLocalAccessor.KEY, observation.observation()));
+        });
+    }
+
+    private AgentTelemetry.AgentObservation executorObservation(AgentExecutor executor, TaskPlan plan) {
+        return telemetry.start(AgentObservationNames.EXECUTOR)
+                .lowCardinality(AgentObservationKeys.Low.EXECUTOR_TYPE,
+                        executor.getClass().getSimpleName())
+                .lowCardinality(AgentObservationKeys.Low.TASK_TYPE,
+                        plan.taskType().name().toLowerCase(java.util.Locale.ROOT))
+                .highCardinality(AgentObservationKeys.High.TURN_ID, plan.turnId());
     }
 
     /**

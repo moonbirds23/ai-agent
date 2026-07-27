@@ -69,7 +69,7 @@ public class PgVectorIndexService implements VectorIndexService {
                     .filter(hit -> hit.pictureId() != null)
                     .toList();
         } catch (Exception e) {
-            log.warn("[PgVectorIndex] 检索失败 query={}", query, e);
+            log.warn("[PgVectorIndex] 检索失败 queryLength={}", query != null ? query.length() : 0, e);
             throw new BusinessException(ErrorCode.SYSTEM_ERROR, "向量检索服务暂时不可用");
         }
     }

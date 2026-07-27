@@ -55,6 +55,20 @@ services:
       PEXELS_API_KEY: ${PEXELS_API_KEY}
       APP_API_KEY: ${APP_API_KEY}
 
+  # Optional local trace backend:
+  # docker compose --profile observability up -d jaeger
+  jaeger:
+    image: jaegertracing/all-in-one:1.62.0
+    container_name: ai-agent-jaeger
+    profiles: ["observability"]
+    restart: unless-stopped
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "16686:16686"
+      - "4317:4317"
+      - "4318:4318"
+
 volumes:
   pgdata:
   redisdata:

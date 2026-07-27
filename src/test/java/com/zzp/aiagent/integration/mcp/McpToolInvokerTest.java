@@ -2,6 +2,11 @@ package com.zzp.aiagent.integration.mcp;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zzp.aiagent.exception.BusinessException;
+import com.zzp.aiagent.observability.AgentObservabilityProperties;
+import com.zzp.aiagent.observability.AgentTelemetry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import io.micrometer.observation.tck.TestObservationRegistry;
+import com.zzp.aiagent.observability.AgentObservationNames;
 import io.modelcontextprotocol.client.McpSyncClient;
 import io.modelcontextprotocol.spec.McpSchema;
 import org.junit.jupiter.api.BeforeEach;
@@ -12,6 +17,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.beans.factory.support.StaticListableBeanFactory;
 
 import java.util.List;
 import java.util.Map;
@@ -44,11 +50,19 @@ class McpToolInvokerTest {
 
     private ObjectMapper objectMapper;
     private McpToolInvoker invoker;
+    private TestObservationRegistry observations;
+    private SimpleMeterRegistry meters;
 
     @BeforeEach
     void setUp() {
         objectMapper = new ObjectMapper();
-        invoker = new McpToolInvoker(List.of(mcpClient), objectMapper);
+        observations = TestObservationRegistry.create();
+        meters = new SimpleMeterRegistry();
+        StaticListableBeanFactory beans = new StaticListableBeanFactory();
+        AgentTelemetry telemetry = new AgentTelemetry(observations, meters,
+                beans.getBeanProvider(io.micrometer.tracing.Tracer.class),
+                new AgentObservabilityProperties(true, false));
+        invoker = new McpToolInvoker(List.of(mcpClient), objectMapper, telemetry);
     }
 
     // ── 成功调用 ─────────────────────────────────────────────────────
@@ -73,6 +87,8 @@ class McpToolInvokerTest {
 
             assertThat(response).contains("\"photos\"");
             assertThat(response).contains("\"id\":1");
+            observations.assertThat().hasObservationWithNameEqualTo(AgentObservationNames.MCP_CALL);
+            assertThat(meters.get("agent.mcp.calls").counter().count()).isEqualTo(1);
         }
 
         @Test
@@ -122,6 +138,8 @@ class McpToolInvokerTest {
                     .isInstanceOf(BusinessException.class)
                     .hasMessageContaining("MCP 工具调用失败")
                     .hasMessageContaining("Connection refused");
+            observations.assertThat().hasObservationWithNameEqualTo(AgentObservationNames.MCP_CALL);
+            assertThat(meters.get("agent.mcp.calls").counter().count()).isEqualTo(1);
         }
     }
 

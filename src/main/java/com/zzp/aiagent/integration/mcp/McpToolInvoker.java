@@ -3,6 +3,9 @@ package com.zzp.aiagent.integration.mcp;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zzp.aiagent.exception.BusinessException;
 import com.zzp.aiagent.exception.ErrorCode;
+import com.zzp.aiagent.observability.AgentObservationKeys;
+import com.zzp.aiagent.observability.AgentObservationNames;
+import com.zzp.aiagent.observability.AgentTelemetry;
 import io.modelcontextprotocol.client.McpSyncClient;
 import io.modelcontextprotocol.spec.McpSchema;
 import lombok.extern.slf4j.Slf4j;
@@ -11,7 +14,8 @@ import org.springframework.stereotype.Component;
 
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
+import java.time.Duration;
+import java.util.UUID;
 
 /**
  * Low-level invoker that sends tool calls to the image-retrieval MCP server
@@ -35,10 +39,13 @@ public class McpToolInvoker {
 
     private final List<McpSyncClient> mcpClients;
     private final ObjectMapper objectMapper;
+    private final AgentTelemetry telemetry;
 
-    public McpToolInvoker(List<McpSyncClient> mcpClients, ObjectMapper objectMapper) {
+    public McpToolInvoker(List<McpSyncClient> mcpClients, ObjectMapper objectMapper,
+                          AgentTelemetry telemetry) {
         this.mcpClients = mcpClients;
         this.objectMapper = objectMapper;
+        this.telemetry = telemetry;
     }
 
     /**
@@ -50,36 +57,55 @@ public class McpToolInvoker {
      * @throws BusinessException if the tool call fails or returns an error
      */
     public String callTool(String toolName, Map<String, Object> arguments) {
-        McpSyncClient client = resolveClient();
-        log.debug("[McpToolInvoker] Calling tool '{}' with args: {}", toolName, arguments);
+        long startedAt = System.nanoTime();
+        String parentSpanId = telemetry.currentSpanId();
+        String logicalToolCallId = parentSpanId != null && !parentSpanId.isBlank()
+                ? parentSpanId
+                : UUID.randomUUID().toString();
+        AgentTelemetry.AgentObservation observation = telemetry.start(AgentObservationNames.MCP_CALL)
+                .lowCardinality(AgentObservationKeys.Low.TOOL_NAME, toolName)
+                .lowCardinality(AgentObservationKeys.Low.MCP_SERVER_NAME, SERVER_NAME)
+                .lowCardinality(AgentObservationKeys.Low.MCP_TRANSPORT, "sse")
+                .highCardinality(AgentObservationKeys.High.TOOL_CALL_ID, logicalToolCallId);
+        try (var ignored = observation.openScope()) {
+            McpSyncClient client = resolveClient();
+            log.debug("[McpToolInvoker] Calling tool '{}' argumentCount={}",
+                    toolName, arguments != null ? arguments.size() : 0);
+            McpSchema.CallToolRequest request = new McpSchema.CallToolRequest(toolName, arguments);
+            McpSchema.CallToolResult result = client.callTool(request);
+            if (Boolean.TRUE.equals(result.isError())) {
+                String errorText = extractTextContent(result);
+                log.error("[McpToolInvoker] Tool returned error: tool={}, errorLength={}",
+                        toolName, errorText != null ? errorText.length() : 0);
+                throw new BusinessException(ErrorCode.SYSTEM_ERROR,
+                        "MCP 工具返回错误：" + toolName + " — " + errorText);
+            }
 
-        McpSchema.CallToolRequest request = new McpSchema.CallToolRequest(toolName, arguments);
-        McpSchema.CallToolResult result;
+            String text = extractTextContent(result);
+            if (text == null || text.isBlank()) {
+                log.warn("[McpToolInvoker] Tool returned empty content: tool={}", toolName);
+                throw new BusinessException(ErrorCode.SYSTEM_ERROR,
+                        "MCP 工具返回空内容：" + toolName);
+            }
 
-        try {
-            result = client.callTool(request);
-        } catch (Exception e) {
-            log.error("[McpToolInvoker] Tool call failed tool={}", toolName, e);
+            observation.lowCardinality(AgentObservationKeys.Low.OUTCOME, "success");
+            recordMcpMetrics(toolName, "success", startedAt);
+            log.debug("[McpToolInvoker] Tool call succeeded: tool={}, responseLength={}", toolName, text.length());
+            return text;
+        } catch (Exception error) {
+            observation.lowCardinality(AgentObservationKeys.Low.OUTCOME, "error")
+                    .error(new McpCallObservationError());
+            recordMcpMetrics(toolName, "error", startedAt);
+            log.error("[McpToolInvoker] Tool call failed tool={} errorType={}",
+                    toolName, error.getClass().getName());
+            if (error instanceof BusinessException businessException) {
+                throw businessException;
+            }
             throw new BusinessException(ErrorCode.SYSTEM_ERROR,
-                    "MCP 工具调用失败：" + toolName + " — " + e.getMessage());
+                    "MCP 工具调用失败：" + toolName + " — " + error.getMessage());
+        } finally {
+            observation.stop();
         }
-
-        if (Boolean.TRUE.equals(result.isError())) {
-            String errorText = extractTextContent(result);
-            log.error("[McpToolInvoker] Tool returned error: tool={}, error={}", toolName, errorText);
-            throw new BusinessException(ErrorCode.SYSTEM_ERROR,
-                    "MCP 工具返回错误：" + toolName + " — " + errorText);
-        }
-
-        String text = extractTextContent(result);
-        if (text == null || text.isBlank()) {
-            log.warn("[McpToolInvoker] Tool returned empty content: tool={}", toolName);
-            throw new BusinessException(ErrorCode.SYSTEM_ERROR,
-                    "MCP 工具返回空内容：" + toolName);
-        }
-
-        log.debug("[McpToolInvoker] Tool call succeeded: tool={}, responseLength={}", toolName, text.length());
-        return text;
     }
 
     /**
@@ -131,5 +157,23 @@ public class McpToolInvoker {
             }
         }
         return null;
+    }
+
+    private void recordMcpMetrics(String toolName, String outcome, long startedAt) {
+        telemetry.increment("agent.mcp.calls",
+                AgentObservationKeys.Low.TOOL_NAME, toolName,
+                AgentObservationKeys.Low.MCP_SERVER_NAME, SERVER_NAME,
+                AgentObservationKeys.Low.OUTCOME, outcome);
+        telemetry.record("agent.mcp.duration",
+                Duration.ofNanos(Math.max(0, System.nanoTime() - startedAt)),
+                AgentObservationKeys.Low.TOOL_NAME, toolName,
+                AgentObservationKeys.Low.MCP_SERVER_NAME, SERVER_NAME,
+                AgentObservationKeys.Low.OUTCOME, outcome);
+    }
+
+    private static final class McpCallObservationError extends RuntimeException {
+        private McpCallObservationError() {
+            super("MCP call failed; response content redacted");
+        }
     }
 }

@@ -20,7 +20,8 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(BusinessException.class)
     public BaseResponse<?> handleBusiness(BusinessException e) {
-        log.warn("BusinessException code={} message={}", e.getCode(), e.getMessage());
+        log.warn("BusinessException code={} exceptionType={}",
+                e.getCode(), e.getClass().getSimpleName());
         return ResultUtils.error(e.getCode(), e.getMessage());
     }
 

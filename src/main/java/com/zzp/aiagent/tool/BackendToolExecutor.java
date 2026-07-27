@@ -64,9 +64,10 @@ public class BackendToolExecutor implements ToolExecutor {
 
     @Override
     public ToolExecutionRecord execute(String turnId, TaskStep step, ToolExecutionContext context) {
+        long startedAt = System.currentTimeMillis();
         Map<String, Object> input = step.input() != null ? step.input() : Map.of();
         try {
-            return switch (step.toolName()) {
+            ToolExecutionRecord record = switch (step.toolName()) {
                 case "searchGallery" -> searchGallery(turnId, input, context);
                 case "getPictureInfo" -> getPictureInfo(turnId, input, context);
                 case "analyzeImage" -> analyzeImage(turnId, input, context);
@@ -78,9 +79,11 @@ public class BackendToolExecutor implements ToolExecutor {
                         "UNSUPPORTED_TOOL", "Manual executor does not support tool: " + step.toolName(),
                         false, "Use Spring AI auto executor for this task");
             };
+            return record.withTiming(startedAt, System.currentTimeMillis());
         } catch (Exception e) {
             log.error("[BackendToolExecutor] tool failed turnId={} tool={}", turnId, step.toolName(), e);
-            return ToolExecutionRecord.failure(turnId, step.toolName(), input, e.getMessage());
+            return ToolExecutionRecord.failure(turnId, step.toolName(), input, e.getMessage())
+                    .withTiming(startedAt, System.currentTimeMillis());
         }
     }
 

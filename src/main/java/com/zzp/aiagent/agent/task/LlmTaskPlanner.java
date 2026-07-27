@@ -43,10 +43,14 @@ public class LlmTaskPlanner {
     }
 
     public TaskPlan plan(ChatRequest request, String turnId) {
+        return planWithMetadata(request, turnId).plan();
+    }
+
+    public PlanningResult planWithMetadata(ChatRequest request, String turnId) {
         TaskPlan fallback = ruleBasedPlanner.plan(request, turnId);
         if (fallback.taskType() == TaskType.CHAT
                 || fallback.taskType() == TaskType.NEED_CLARIFICATION) {
-            return fallback;
+            return new PlanningResult(fallback, PlanSource.RULE, false, false);
         }
 
         TaskPlan plan;
@@ -58,23 +62,25 @@ public class LlmTaskPlanner {
             plan = normalize(candidate, fallback, turnId, request);
         } catch (Exception e) {
             log.warn("[LlmTaskPlanner] LLM planning failed, using rule fallback: {}", e.getMessage());
-            plan = fallback;
+            return new PlanningResult(fallback, PlanSource.RULE_FALLBACK, false, false);
         }
 
         PlanValidationResult validation = validator.validate(plan, request);
         if (validation.valid()) {
-            return plan;
+            return new PlanningResult(plan,
+                    plan == fallback ? PlanSource.RULE_FALLBACK : PlanSource.LLM,
+                    false, false);
         }
 
         log.info("[LlmTaskPlanner] Plan validation failed, attempting repair");
         TaskPlan repaired = repair.repair(plan, request);
         if (repaired != null) {
-            return repaired;
+            return new PlanningResult(repaired, PlanSource.REPAIRED, true, true);
         }
 
         log.warn("[LlmTaskPlanner] Repair failed, returning original plan with validation errors: {}",
                 validation.errors());
-        return fallback;
+        return new PlanningResult(fallback, PlanSource.RULE_FALLBACK, true, true);
     }
 
     private static String buildPlannerInput(ChatRequest request) {

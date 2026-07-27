@@ -161,6 +161,41 @@ class TaskGovernanceTest {
         assertThat(validator.validate(repaired, request).valid()).isTrue();
     }
 
+    @Test
+    void ledgerPreservesToolCallStartAndFinishTime() throws InterruptedException {
+        TaskLedger ledger = new TaskLedger();
+        ledger.beforeCall("turn-timing", "searchGallery", Map.of("query", "snow"));
+        Thread.sleep(15);
+
+        ledger.recordSuccess("turn-timing", "searchGallery", Map.of("query", "snow"),
+                Map.of("resultCount", 1), ToolExecutionRecord.NONE);
+
+        assertThat(ledger.getRecords("turn-timing")).singleElement()
+                .satisfies(record -> {
+                    assertThat(record.finishedAt()).isGreaterThan(record.startedAt());
+                    assertThat(record.elapsedMs()).isGreaterThanOrEqualTo(10);
+                });
+    }
+
+    @Test
+    void ledgerFailurePreservesRecoveryHintAndTiming() throws InterruptedException {
+        TaskLedger ledger = new TaskLedger();
+        ledger.beforeCall("turn-failure", "generateImage", Map.of("prompt", "poster"));
+        Thread.sleep(15);
+
+        ledger.recordFailure("turn-failure", "generateImage",
+                Map.of("prompt", "poster"), "provider unavailable");
+
+        assertThat(ledger.getRecords("turn-failure")).singleElement()
+                .satisfies(record -> {
+                    assertThat(record.success()).isFalse();
+                    assertThat(record.recoverable()).isTrue();
+                    assertThat(record.recoveryHint()).isNotBlank();
+                    assertThat(record.finishedAt()).isGreaterThan(record.startedAt());
+                    assertThat(record.elapsedMs()).isGreaterThanOrEqualTo(10);
+                });
+    }
+
     private static TaskPlan planWithPexelsDependency(ChatRequest request, String turnId) {
         return new TaskPlan(
                 turnId, TaskType.IMAGE_GENERATION, request.message(),

@@ -44,9 +44,19 @@ public record ToolExecutionRecord(
                                                Map<String, Object> output,
                                                String sideEffect) {
         long now = System.currentTimeMillis();
+        return success(turnId, toolName, input, output, sideEffect, now, now);
+    }
+
+    public static ToolExecutionRecord success(String turnId, String toolName,
+                                               Map<String, Object> input,
+                                               Map<String, Object> output,
+                                               String sideEffect,
+                                               long startedAt,
+                                               long finishedAt) {
         return new ToolExecutionRecord(turnId, toolName, input, output,
                 inferResources(output), true, null, null,
-                sideEffect != null ? sideEffect : NONE, false, null, now, now);
+                sideEffect != null ? sideEffect : NONE, false, null,
+                startedAt, Math.max(startedAt, finishedAt));
     }
 
     public static ToolExecutionRecord failure(String turnId, String toolName,
@@ -63,8 +73,27 @@ public record ToolExecutionRecord(
                                                boolean recoverable,
                                                String recoveryHint) {
         long now = System.currentTimeMillis();
+        return failure(turnId, toolName, input, errorCode, errorMessage,
+                recoverable, recoveryHint, now, now);
+    }
+
+    public static ToolExecutionRecord failure(String turnId, String toolName,
+                                               Map<String, Object> input,
+                                               String errorCode,
+                                               String errorMessage,
+                                               boolean recoverable,
+                                               String recoveryHint,
+                                               long startedAt,
+                                               long finishedAt) {
         return new ToolExecutionRecord(turnId, toolName, input, Map.of(), List.of(),
-                false, errorCode, errorMessage, NONE, recoverable, recoveryHint, now, now);
+                false, errorCode, errorMessage, NONE, recoverable, recoveryHint,
+                startedAt, Math.max(startedAt, finishedAt));
+    }
+
+    public ToolExecutionRecord withTiming(long startedAt, long finishedAt) {
+        return new ToolExecutionRecord(turnId, toolName, input, output, resources,
+                success, errorCode, errorMessage, sideEffect, recoverable, recoveryHint,
+                startedAt, Math.max(startedAt, finishedAt));
     }
 
     /** Elapsed time in milliseconds. */

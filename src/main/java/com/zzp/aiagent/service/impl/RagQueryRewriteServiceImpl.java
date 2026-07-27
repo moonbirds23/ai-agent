@@ -68,8 +68,11 @@ public class RagQueryRewriteServiceImpl implements RagQueryRewriteService {
 
             String json = extractJson(response);
             RagRewriteResult result = objectMapper.readValue(json, RagRewriteResult.class);
-            log.info("[QueryRewrite] 改写成功: \"{}\" -> \"{}\" (mode={}, tags={})",
-                    userMessage, result.searchQuery(), result.referenceMode(), result.tags());
+            log.info("[QueryRewrite] 改写成功 inputLength={} outputLength={} mode={} tagCount={}",
+                    userMessage.length(),
+                    result.searchQuery() != null ? result.searchQuery().length() : 0,
+                    result.referenceMode(),
+                    result.tags() != null ? result.tags().size() : 0);
             return result;
         } catch (TimeoutException e) {
             log.warn("[QueryRewrite] 调用超时(30s)，使用fallback");
