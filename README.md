@@ -23,7 +23,7 @@
 | **MCP 超时失败** | 有限重试、禁止虚假成功、失败结果不写记忆 | 2 次超时 → 验收失败 → Memory=false |
 | MCP 跨进程搜索 | Tool Call → MCP Server → Pexels，使用 Span Link 表达跨 Trace 因果关系 | 3 个真实候选，详情页高级案例 |
 
-[查看完整 Trace、公开提示词、Span 属性、性能拆分与自动断言脚本](docs/observability/agent-tracing.md)
+[查看完整可观测性架构、代表性 Trace、性能拆分与能力边界](docs/observability/agent-tracing.md)
 
 **成功链路：RAG 命中后生图**
 
