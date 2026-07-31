@@ -6,12 +6,18 @@
   <img src="https://img.shields.io/badge/Spring%20AI-1.0.0-blue?logo=spring" alt="Spring AI 1.0">
   <img src="https://img.shields.io/badge/PostgreSQL-16-336791?logo=postgresql" alt="PG 16">
   <img src="https://img.shields.io/badge/Redis-7-DC382D?logo=redis" alt="Redis 7">
-  <img src="https://img.shields.io/badge/tests-288%20passed-success" alt="288 tests passed">
   <img src="https://img.shields.io/badge/MCP-1.0.0-purple?logo=anthropic" alt="MCP">
   <a href="https://github.com/moonbirds23/ai-agent/actions"><img src="https://github.com/moonbirds23/ai-agent/actions/workflows/build.yml/badge.svg" alt="Build"></a>
 </p>
 
 **基于 Spring AI 的多模态 AI Agent，实现对话式图片生成、图库管理与检索增强。** 全链路接入智谱 GLM 大模型（GLM-4-Flash / GLM-4.5V / CogView-4 / Embedding-2），支持流式 SSE 响应、LLM 驱动的任务规划与 WorkflowEngine 工作流引擎、三层 RAG 检索增强、MCP 工具协议、PGVector 语义检索及 RAG 评测体系。
+
+## 文档导航
+
+- [系统架构](docs/architecture/README.md)
+- [运行与评测指南](docs/guides/README.md)
+- [架构决策](docs/decisions/README.md)
+- [工程实现笔记](docs/engineering-notes/README.md)
 
 ## 真实 Agent Trace 案例
 
@@ -172,7 +178,7 @@ IMAGE_RETRIEVAL_MODE=mcp mvn spring-boot:run -Dspring-boot.run.profiles=local
 - **速率限制**：`RedisRateLimiter` — Lua 脚本滑动窗口，分布式部署共享计数
 - **XSS 防护**：前端 `escHtml()` / `escAttr()` / `jsString()` 三层转义
 
-### 生产就绪
+### 工程化保障
 
 - **健康探针**：Spring Boot Actuator + liveness/readiness probes
 - **优雅关闭**：`server.shutdown: graceful` + 30s 等待 SSE 完成
