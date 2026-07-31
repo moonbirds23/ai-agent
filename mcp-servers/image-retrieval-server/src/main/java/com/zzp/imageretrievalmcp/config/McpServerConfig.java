@@ -1,5 +1,10 @@
 package com.zzp.imageretrievalmcp.config;
 
+import com.zzp.imageretrievalmcp.tool.HealthCheckTool;
+import com.zzp.imageretrievalmcp.tool.PexelsTools;
+import org.springframework.ai.tool.ToolCallbackProvider;
+import org.springframework.ai.tool.method.MethodToolCallbackProvider;
+import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 /**
@@ -9,4 +14,13 @@ import org.springframework.context.annotation.Configuration;
  */
 @Configuration
 public class McpServerConfig {
+
+    @Bean
+    ToolCallbackProvider imageRetrievalToolCallbackProvider(
+            PexelsTools pexelsTools,
+            HealthCheckTool healthCheckTool) {
+        return MethodToolCallbackProvider.builder()
+                .toolObjects(pexelsTools, healthCheckTool)
+                .build();
+    }
 }

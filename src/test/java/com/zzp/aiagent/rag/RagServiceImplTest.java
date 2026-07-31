@@ -17,6 +17,13 @@ import com.zzp.aiagent.service.impl.RagServiceImpl;
 import com.zzp.aiagent.domain.template.StyleTemplate;
 import com.zzp.aiagent.domain.rag.RagProperties;
 import com.zzp.aiagent.service.impl.ExplicitReferenceResolver;
+import com.zzp.aiagent.observability.AgentTelemetry;
+import com.zzp.aiagent.observability.AgentObservabilityProperties;
+import com.zzp.aiagent.observability.AgentObservationKeys;
+import com.zzp.aiagent.observability.AgentObservationNames;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import io.micrometer.observation.tck.TestObservationRegistry;
+import io.micrometer.tracing.Tracer;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -29,6 +36,7 @@ import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.support.StaticListableBeanFactory;
 
 import java.time.LocalDateTime;
 import java.util.Collections;
@@ -36,6 +44,7 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -69,6 +78,7 @@ class RagServiceImplTest {
     @Mock private ObjectProvider<RagContextPacker> packerProvider;
     @Mock private ObjectProvider<RagTraceService> traceProvider;
     @Mock private ObjectProvider<ChatMemory> chatMemoryProvider;
+    @Mock private ObjectProvider<AgentTelemetry> telemetryProvider;
 
     @Mock private RagQueryRewriteService rewriteService;
     @Mock private HybridGalleryRetriever hybridRetriever;
@@ -77,6 +87,8 @@ class RagServiceImplTest {
     @Mock private RagTraceService traceService;
 
     private RagServiceImpl ragService;
+    private TestObservationRegistry observations;
+    private SimpleMeterRegistry meters;
 
     @BeforeEach
     void setUp() {
@@ -85,6 +97,13 @@ class RagServiceImplTest {
         when(rerankerProvider.getIfAvailable()).thenReturn(reranker);
         when(packerProvider.getIfAvailable()).thenReturn(packer);
         when(traceProvider.getIfAvailable()).thenReturn(traceService);
+        observations = TestObservationRegistry.create();
+        meters = new SimpleMeterRegistry();
+        StaticListableBeanFactory beans = new StaticListableBeanFactory();
+        AgentTelemetry telemetry = new AgentTelemetry(observations, meters,
+                beans.getBeanProvider(Tracer.class),
+                new AgentObservabilityProperties(true, false));
+        when(telemetryProvider.getIfAvailable()).thenReturn(telemetry);
 
         // Default: rewrite returns fallback (same as original), retrieve returns empty
         when(rewriteService.rewrite(anyString(), anyString()))
@@ -100,7 +119,7 @@ class RagServiceImplTest {
 
         ragService = new RagServiceImpl(explicitResolver, templateService,
                 ragProperties, rewriteProvider, hybridProvider, rerankerProvider,
-                packerProvider, traceProvider, chatMemoryProvider);
+                packerProvider, traceProvider, chatMemoryProvider, telemetryProvider);
     }
 
     private static GalleryPicture samplePic(long id, String name) {
@@ -239,6 +258,41 @@ class RagServiceImplTest {
 
             verify(rewriteService, never()).rewrite(anyString(), anyString());
             verify(hybridRetriever, never()).retrieve(any());
+        }
+
+        @Test
+        @DisplayName("空召回 → 记录 RAG 分段 Span 和空召回指标")
+        void emptyRetrieval_recordsObservationsAndMetrics() {
+            ChatRequest req = new ChatRequest("minimal poster", "chat-rag", true, null, null,
+                    "image_generation", null, true, null, null, null);
+
+            ragService.buildContext(req);
+
+            observations.assertThat().hasObservationWithNameEqualTo(AgentObservationNames.RAG);
+            observations.assertThat().hasObservationWithNameEqualTo(AgentObservationNames.RAG_REWRITE);
+            observations.assertThat().hasObservationWithNameEqualTo(AgentObservationNames.RAG_RETRIEVE);
+            observations.assertThat().hasObservationWithNameEqualTo(AgentObservationNames.RAG_RERANK);
+            assertThat(meters.get("agent.rag.requests").counter().count()).isEqualTo(1);
+            assertThat(meters.get("agent.rag.candidates").summary().count()).isEqualTo(1);
+            assertThat(meters.get("agent.rag.candidates").summary().totalAmount()).isZero();
+        }
+
+        @Test
+        @DisplayName("检索异常 → 标记 error，但不计为空召回")
+        void retrievalFailure_isNotCountedAsEmptyRecall() {
+            when(hybridRetriever.retrieve(any())).thenThrow(new IllegalStateException("vector unavailable"));
+            ChatRequest req = new ChatRequest("minimal poster", "chat-rag-error", true, null, null,
+                    "image_generation", null, true, null, null, null);
+
+            assertThatThrownBy(() -> ragService.buildContext(req))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessage("vector unavailable");
+
+            assertThat(meters.get("agent.rag.requests")
+                    .tags(AgentObservationKeys.Low.RAG_PATH, "UNKNOWN",
+                            AgentObservationKeys.Low.RAG_EMPTY, "false",
+                            AgentObservationKeys.Low.OUTCOME, "error")
+                    .counter().count()).isEqualTo(1);
         }
     }
 

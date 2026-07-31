@@ -64,9 +64,10 @@ public class BackendToolExecutor implements ToolExecutor {
 
     @Override
     public ToolExecutionRecord execute(String turnId, TaskStep step, ToolExecutionContext context) {
+        long startedAt = System.currentTimeMillis();
         Map<String, Object> input = step.input() != null ? step.input() : Map.of();
         try {
-            return switch (step.toolName()) {
+            ToolExecutionRecord record = switch (step.toolName()) {
                 case "searchGallery" -> searchGallery(turnId, input, context);
                 case "getPictureInfo" -> getPictureInfo(turnId, input, context);
                 case "analyzeImage" -> analyzeImage(turnId, input, context);
@@ -78,9 +79,11 @@ public class BackendToolExecutor implements ToolExecutor {
                         "UNSUPPORTED_TOOL", "Manual executor does not support tool: " + step.toolName(),
                         false, "Use Spring AI auto executor for this task");
             };
+            return record.withTiming(startedAt, System.currentTimeMillis());
         } catch (Exception e) {
             log.error("[BackendToolExecutor] tool failed turnId={} tool={}", turnId, step.toolName(), e);
-            return ToolExecutionRecord.failure(turnId, step.toolName(), input, e.getMessage());
+            return ToolExecutionRecord.failure(turnId, step.toolName(), input, e.getMessage())
+                    .withTiming(startedAt, System.currentTimeMillis());
         }
     }
 
@@ -164,9 +167,33 @@ public class BackendToolExecutor implements ToolExecutor {
         progressContext.recordGeneratedImage(turnId, new ImageGeneratedEventVO(
                 result.imageUrl(), result.imageBase64(), prompt, result.revisedPrompt(),
                 style, dimensions, result.metadata()));
+        Map<String, Object> verifiedInput = new LinkedHashMap<>();
+        verifiedInput.put("prompt", prompt);
+        verifiedInput.put("style", style);
+        verifiedInput.put("dimensions", dimensions);
+        verifiedInput.put("referencePictureIds", referencedPictureIds(context));
         return ToolExecutionRecord.success(turnId, "generateImage",
-                Map.of("prompt", prompt, "style", style, "dimensions", dimensions),
+                verifiedInput,
                 output, ToolExecutionRecord.IMAGE_GENERATED);
+    }
+
+    private static List<Long> referencedPictureIds(ToolExecutionContext context) {
+        return context.completedRecords().stream()
+                .filter(record -> record.success() && "searchGallery".equals(record.toolName()))
+                .map(record -> record.output().get("pictureIds"))
+                .filter(Iterable.class::isInstance)
+                .map(Iterable.class::cast)
+                .flatMap(ids -> {
+                    List<Long> values = new java.util.ArrayList<>();
+                    ids.forEach(id -> {
+                        if (id instanceof Number number) {
+                            values.add(number.longValue());
+                        }
+                    });
+                    return values.stream();
+                })
+                .distinct()
+                .toList();
     }
 
     private ToolExecutionRecord searchPexels(String turnId, Map<String, Object> input,

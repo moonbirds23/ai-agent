@@ -1,0 +1,13 @@
+apiVersion: 1
+
+providers:
+  - name: AI Agent Observability
+    orgId: 1
+    folder: AI Agent
+    type: file
+    disableDeletion: true
+    updateIntervalSeconds: 10
+    allowUiUpdates: false
+    options:
+      path: ${AGENT_GRAFANA_DASHBOARDS_PATH}
+      foldersFromFilesStructure: false

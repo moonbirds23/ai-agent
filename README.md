@@ -6,37 +6,60 @@
   <img src="https://img.shields.io/badge/Spring%20AI-1.0.0-blue?logo=spring" alt="Spring AI 1.0">
   <img src="https://img.shields.io/badge/PostgreSQL-16-336791?logo=postgresql" alt="PG 16">
   <img src="https://img.shields.io/badge/Redis-7-DC382D?logo=redis" alt="Redis 7">
-  <img src="https://img.shields.io/badge/tests-254%20passed-success" alt="254 tests">
+  <img src="https://img.shields.io/badge/tests-288%20passed-success" alt="288 tests passed">
   <img src="https://img.shields.io/badge/MCP-1.0.0-purple?logo=anthropic" alt="MCP">
   <a href="https://github.com/moonbirds23/ai-agent/actions"><img src="https://github.com/moonbirds23/ai-agent/actions/workflows/build.yml/badge.svg" alt="Build"></a>
 </p>
 
 **基于 Spring AI 的多模态 AI Agent，实现对话式图片生成、图库管理与检索增强。** 全链路接入智谱 GLM 大模型（GLM-4-Flash / GLM-4.5V / CogView-4 / Embedding-2），支持流式 SSE 响应、LLM 驱动的任务规划与 WorkflowEngine 工作流引擎、三层 RAG 检索增强、MCP 工具协议、PGVector 语义检索及 RAG 评测体系。
 
+## 真实 Agent Trace 案例
+
+本项目提供三条经过本地真实运行验证的 Trace：
+
+| 案例 | 证明什么 | 实测结果 |
+|---|---|---|
+| **RAG 雪景生图** | 检索结果真实进入生成工具并通过后端验收 | 39 候选 → 5 参考 → 1 张图片 |
+| **MCP 超时失败** | 有限重试、禁止虚假成功、失败结果不写记忆 | 2 次超时 → 验收失败 → Memory=false |
+| MCP 跨进程搜索 | Tool Call → MCP Server → Pexels，使用 Span Link 表达跨 Trace 因果关系 | 3 个真实候选，详情页高级案例 |
+
+[查看完整可观测性架构、代表性 Trace、性能拆分与能力边界](docs/observability/agent-tracing.md)
+
+**成功链路：RAG 命中后生图**
+
+![RAG 命中后生图 Trace](docs/assets/observability/trace-a-overview.png)
+
+**失败链路：MCP 超时后拒绝伪造结果**
+
+![MCP 超时与验收失败 Trace](docs/assets/observability/trace-c-overview.png)
+
+> MCP SSE 在当前 Spring AI 1.0.0 / MCP SDK 0.10.0 下不能可靠逐调用传播
+> W3C Trace Context。项目使用真实 Span Link 表达跨 Trace 因果关系，并记录
+> `agent.mcp.trace_context_propagated=false`，没有用业务 ID 冒充父子链。
 
 ---
 
 ## 架构全景
 
-![系统架构图](docs/plots/系统架构图.png)
+![系统架构图](docs/assets/diagrams/系统架构图.png)
 
 > 四层架构：浏览器调试台 → Spring Boot 应用层 → 数据/缓存中间件 → 外部 AI 服务
 
 ### Agent 请求处理全流程
 
-![Agent请求处理](docs/plots/Agent请求处理.png)
+![Agent请求处理](docs/assets/diagrams/Agent请求处理.png)
 
 > 一个用户请求经过的 5 个阶段：预处理 → WorkflowEngine 规划 → 执行器路由 → 步骤执行 → 验收与响应
 
 ### WorkflowEngine 意图路由
 
-![意图路由决策树](docs/plots/意图路由决策树.png)
+![意图路由决策树](docs/assets/diagrams/意图路由决策树.png)
 
 > 11 种意图分类 + 执行器选择策略：规则引擎优先，LLM 规划兜底
 
 ### RAG 检索增强链路
 
-![三层RAG索引增强链路](docs/plots/三层RAG索引增强链路.png)
+![三层RAG索引增强链路](docs/assets/diagrams/三层RAG索引增强链路.png)
 
 > 三层渐进式检索：显式参考图（优先）→ 混合检索增强（自动）→ 风格模板（兜底）
 

@@ -1,8 +1,23 @@
 spring:
+  reactor:
+    context-propagation: auto
   config:
     import:
       - classpath:rag/style-templates.yml
   ai:
+    chat:
+      client:
+        observations:
+          log-prompt: false
+      observations:
+        log-prompt: false
+        log-completion: false
+    tools:
+      observations:
+        include-content: false
+    image:
+      observations:
+        log-prompt: false
     openai:
       api-key: ${ZHIPU_API_KEY:}
       base-url: https://open.bigmodel.cn/api/paas/v4
@@ -16,6 +31,8 @@ spring:
         options:
           model: embedding-2
     vectorstore:
+      observations:
+        log-query-response: false
       pgvector:
         initialize-schema: true
         index-type: ivfflat
@@ -65,6 +82,17 @@ spring:
       add-mappings: false
 
 app:
+  observability:
+    agent:
+      enabled: ${AGENT_OBSERVABILITY_ENABLED:true}
+      pricing-enabled: ${AGENT_COST_ESTIMATION_ENABLED:true}
+      pricing:
+        currency: CNY
+        models:
+          glm-4-flash:
+            input-per-million: 0
+            output-per-million: 0
+            version: zhipu-official-2026-07-27
   integrations:
     image-retrieval:
       mode: ${IMAGE_RETRIEVAL_MODE:local}
@@ -175,10 +203,23 @@ server:
 
 # management 健康检查 + 就绪探针
 management:
+  tracing:
+    enabled: ${TRACING_ENABLED:true}
+    sampling:
+      probability: ${TRACING_SAMPLING_PROBABILITY:1.0}
+  otlp:
+    tracing:
+      endpoint: ${OTEL_TRACES_ENDPOINT:http://localhost:4318/v1/traces}
+      connect-timeout: 1s
+      timeout: 5s
+    metrics:
+      export:
+        enabled: ${OTEL_METRICS_EXPORT_ENABLED:false}
+        url: ${OTEL_METRICS_ENDPOINT:http://localhost:4318/v1/metrics}
   endpoints:
     web:
       exposure:
-        include: health,info
+        include: health,info,metrics,prometheus
   endpoint:
     health:
       probes:

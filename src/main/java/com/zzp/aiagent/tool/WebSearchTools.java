@@ -130,7 +130,7 @@ public class WebSearchTools {
                 taskLedger.recordSuccess(turnId, "webSearch", input, Map.of(), ToolExecutionRecord.WEB_FETCHED);
                 return result;
             } catch (Exception e) {
-                log.warn("[WebSearch] 国际版搜索失败, query={}: {}", query, e.getMessage());
+                log.warn("[WebSearch] 国际版搜索失败, queryLength={}: {}", query.length(), e.getMessage());
                 if ("international".equals(src)) {
                     progressContext.fail(toolContext, "webSearch", e.getMessage());
                     taskLedger.recordFailure(turnId, "webSearch", input, e.getMessage());
@@ -147,7 +147,7 @@ public class WebSearchTools {
                 taskLedger.recordSuccess(turnId, "webSearch", input, Map.of(), ToolExecutionRecord.WEB_FETCHED);
                 return result;
             } catch (Exception e) {
-                log.error("[WebSearch] 国内版搜索失败 query={}: {}", query, e.getMessage());
+                log.error("[WebSearch] 国内版搜索失败 queryLength={}: {}", query.length(), e.getMessage());
                 progressContext.fail(toolContext, "webSearch", e.getMessage());
                 taskLedger.recordFailure(turnId, "webSearch", input, e.getMessage());
                 return "搜索失败: " + e.getMessage() + "。请稍后重试。";
@@ -421,7 +421,7 @@ public class WebSearchTools {
                 progressContext.progress(toolContext, "正在搜索 Bing 图片国际版：" + query);
                 results = searchImageCandidates(query, limit, candidatePool, "www.bing.com", true);
             } catch (Exception e) {
-                log.warn("[WebImageSearch] 国际版图片搜索失败 query={}: {}", query, e.getMessage());
+                log.warn("[WebImageSearch] 国际版图片搜索失败 queryLength={}: {}", query.length(), e.getMessage());
                 if ("international".equals(source)) {
                     return List.of();
                 }
@@ -433,7 +433,7 @@ public class WebSearchTools {
                 progressContext.progress(toolContext, "正在搜索 Bing 图片国内版：" + query);
                 results = searchImageCandidates(query, limit, candidatePool, "cn.bing.com", false);
             } catch (Exception e) {
-                log.warn("[WebImageSearch] 国内版图片搜索失败 query={}: {}", query, e.getMessage());
+                log.warn("[WebImageSearch] 国内版图片搜索失败 queryLength={}: {}", query.length(), e.getMessage());
             }
         }
         return results.stream().limit(limit).toList();
@@ -450,8 +450,8 @@ public class WebSearchTools {
         }
         List<ImageCandidate> ranked = rankAndFilterCandidates(query, rawCandidates, limit);
         if (props.imageSearchDebug()) {
-            log.info("[WebImageSearch] final query=\"{}\" host={} raw={} ranked={} top={}",
-                    query, host, rawCandidates.size(), ranked.size(), summarizeCandidates(ranked));
+            log.info("[WebImageSearch] final queryLength={} host={} raw={} ranked={} top={}",
+                    query.length(), host, rawCandidates.size(), ranked.size(), summarizeCandidates(ranked));
         }
         return ranked;
     }
@@ -1002,7 +1002,7 @@ public class WebSearchTools {
 
         @Override
         public String toString() {
-            return "query=\"" + query + "\" host=" + host
+            return "queryLength=" + (query != null ? query.length() : 0) + " host=" + host
                     + " endpoint=" + endpoint
                     + " status=" + status
                     + " bytes=" + bytes

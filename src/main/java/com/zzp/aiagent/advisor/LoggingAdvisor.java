@@ -55,9 +55,8 @@ public class LoggingAdvisor implements CallAdvisor, StreamAdvisor {
 
     private void logRequest(String chatId, String mode, String actualPrompt) {
         String time = TIME_FMT.format(Instant.now().atZone(ZoneId.systemDefault()));
-        log.info("[AI-请求] 时间={} chatId={} 方式={}", time, chatId, mode);
-        log.info("[AI-请求] chatId={} 实际Prompt(length={}): {}", chatId,
-                actualPrompt != null ? actualPrompt.length() : 0, actualPrompt);
+        log.info("[AI-请求] 时间={} chatId={} 方式={} promptLength={}",
+                time, chatId, mode, actualPrompt != null ? actualPrompt.length() : 0);
     }
 
     private void logResponse(String chatId, Instant start, ChatClientResponse response) {
@@ -65,7 +64,6 @@ public class LoggingAdvisor implements CallAdvisor, StreamAdvisor {
         String responseText = safeGetText(response);
         log.info("[AI-响应] chatId={} 耗时={}ms 回复字符数={}",
                 chatId, elapsed, responseText != null ? responseText.length() : 0);
-        log.info("[AI-响应] chatId={} 回复内容: {}", chatId, responseText);
     }
 
     private ChatClientRequest withStartTime(ChatClientRequest request, Instant start) {

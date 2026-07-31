@@ -2,6 +2,11 @@ package com.zzp.aiagent.integration.mcp;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zzp.aiagent.exception.BusinessException;
+import com.zzp.aiagent.observability.AgentObservabilityProperties;
+import com.zzp.aiagent.observability.AgentTelemetry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import io.micrometer.observation.tck.TestObservationRegistry;
+import com.zzp.aiagent.observability.AgentObservationNames;
 import io.modelcontextprotocol.client.McpSyncClient;
 import io.modelcontextprotocol.spec.McpSchema;
 import org.junit.jupiter.api.BeforeEach;
@@ -11,7 +16,9 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
+import org.mockito.ArgumentCaptor;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.beans.factory.support.StaticListableBeanFactory;
 
 import java.util.List;
 import java.util.Map;
@@ -19,6 +26,9 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -44,11 +54,20 @@ class McpToolInvokerTest {
 
     private ObjectMapper objectMapper;
     private McpToolInvoker invoker;
+    private TestObservationRegistry observations;
+    private SimpleMeterRegistry meters;
+    private AgentTelemetry telemetry;
 
     @BeforeEach
     void setUp() {
         objectMapper = new ObjectMapper();
-        invoker = new McpToolInvoker(List.of(mcpClient), objectMapper);
+        observations = TestObservationRegistry.create();
+        meters = new SimpleMeterRegistry();
+        StaticListableBeanFactory beans = new StaticListableBeanFactory();
+        telemetry = spy(new AgentTelemetry(observations, meters,
+                beans.getBeanProvider(io.micrometer.tracing.Tracer.class),
+                new AgentObservabilityProperties(true, false)));
+        invoker = new McpToolInvoker(List.of(mcpClient), objectMapper, telemetry);
     }
 
     // ── 成功调用 ─────────────────────────────────────────────────────
@@ -73,6 +92,30 @@ class McpToolInvokerTest {
 
             assertThat(response).contains("\"photos\"");
             assertThat(response).contains("\"id\":1");
+            observations.assertThat().hasObservationWithNameEqualTo(AgentObservationNames.MCP_CALL);
+            assertThat(meters.get("agent.mcp.calls").counter().count()).isEqualTo(1);
+        }
+
+        @Test
+        @DisplayName("SSE 不传播上下文时 → 携带合法 traceparent 供服务端创建 Span Link")
+        void carriesTraceparentOnlyAsSpanLinkMetadata() {
+            when(mcpClient.isInitialized()).thenReturn(true);
+            when(mcpClient.getServerInfo()).thenReturn(
+                    new McpSchema.Implementation("image-retrieval-server", "1.0.0"));
+            when(mcpClient.callTool(any())).thenReturn(new McpSchema.CallToolResult(
+                    List.of(new McpSchema.TextContent("{\"photos\":[]}")), false));
+            String traceparent =
+                    "00-11111111111111111111111111111111-2222222222222222-01";
+            doReturn(traceparent).when(telemetry).currentTraceParent();
+
+            invoker.callTool("pexelsSearchPhotos",
+                    Map.of("query", "test", "perPage", 3, "page", 1));
+
+            ArgumentCaptor<McpSchema.CallToolRequest> request =
+                    ArgumentCaptor.forClass(McpSchema.CallToolRequest.class);
+            verify(mcpClient).callTool(request.capture());
+            assertThat(request.getValue().arguments())
+                    .containsEntry(McpToolInvoker.LINK_TRACEPARENT_ARGUMENT, traceparent);
         }
 
         @Test
@@ -122,6 +165,8 @@ class McpToolInvokerTest {
                     .isInstanceOf(BusinessException.class)
                     .hasMessageContaining("MCP 工具调用失败")
                     .hasMessageContaining("Connection refused");
+            observations.assertThat().hasObservationWithNameEqualTo(AgentObservationNames.MCP_CALL);
+            assertThat(meters.get("agent.mcp.calls").counter().count()).isEqualTo(1);
         }
     }
 

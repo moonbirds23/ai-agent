@@ -30,6 +30,7 @@ public class TaskLedger {
     private final ConcurrentMap<String, TaskLifecycleStatus> statuses = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, VerificationResult> verifications = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, Map<String, StepStatus>> stepStatuses = new ConcurrentHashMap<>();
+    private final ConcurrentMap<String, Map<String, Long>> callStartedAt = new ConcurrentHashMap<>();
 
     // ── lifecycle ───────────────────────────────────────────────────
 
@@ -69,6 +70,8 @@ public class TaskLedger {
             }
         }
 
+        callStartedAt.computeIfAbsent(turnId, ignored -> new ConcurrentHashMap<>())
+                .put(toolName, System.currentTimeMillis());
         return count;
     }
 
@@ -77,7 +80,10 @@ public class TaskLedger {
                               Map<String, Object> input, Map<String, Object> output,
                               String sideEffect) {
         if (turnId == null || turnId.isBlank()) return;
-        ToolExecutionRecord record = ToolExecutionRecord.success(turnId, toolName, input, output, sideEffect);
+        long finishedAt = System.currentTimeMillis();
+        long startedAt = takeStartedAt(turnId, toolName, finishedAt);
+        ToolExecutionRecord record = ToolExecutionRecord.success(
+                turnId, toolName, input, output, sideEffect, startedAt, finishedAt);
         append(turnId, record);
         statuses.put(turnId, TaskLifecycleStatus.RUNNING);
         log.debug("[TaskLedger] {} success turnId={} sideEffect={}", toolName, turnId, sideEffect);
@@ -87,10 +93,24 @@ public class TaskLedger {
     public void recordFailure(String turnId, String toolName,
                               Map<String, Object> input, String errorMessage) {
         if (turnId == null || turnId.isBlank()) return;
-        ToolExecutionRecord record = ToolExecutionRecord.failure(turnId, toolName, input, errorMessage);
+        long finishedAt = System.currentTimeMillis();
+        long startedAt = takeStartedAt(turnId, toolName, finishedAt);
+        ToolExecutionRecord record = ToolExecutionRecord
+                .failure(turnId, toolName, input, errorMessage)
+                .withTiming(startedAt, finishedAt);
         append(turnId, record);
         statuses.put(turnId, TaskLifecycleStatus.RUNNING);
         log.debug("[TaskLedger] {} failed turnId={} error={}", toolName, turnId, errorMessage);
+    }
+
+    /** Record the authoritative execution result without rebuilding its timing evidence. */
+    public void recordExecution(ToolExecutionRecord record) {
+        if (record == null || record.turnId() == null || record.turnId().isBlank()) return;
+        discardStartedAt(record.turnId(), record.toolName());
+        append(record.turnId(), record);
+        statuses.put(record.turnId(), TaskLifecycleStatus.RUNNING);
+        log.debug("[TaskLedger] {} {} turnId={} elapsedMs={}", record.toolName(),
+                record.success() ? "success" : "failed", record.turnId(), record.elapsedMs());
     }
 
     // ── task plan lifecycle ────────────────────────────────────────
@@ -169,6 +189,7 @@ public class TaskLedger {
         stepStatuses.computeIfAbsent(turnId, k -> new ConcurrentHashMap<>())
                 .put(stepCode, StepStatus.SUCCESS);
         if (record != null) {
+            discardStartedAt(turnId, record.toolName());
             append(turnId, record);
         }
         log.debug("[TaskLedger] step completed turnId={} step={}", turnId, stepCode);
@@ -243,6 +264,7 @@ public class TaskLedger {
             statuses.remove(turnId);
             verifications.remove(turnId);
             stepStatuses.remove(turnId);
+            callStartedAt.remove(turnId);
         }
     }
 
@@ -250,6 +272,20 @@ public class TaskLedger {
 
     private void append(String turnId, ToolExecutionRecord record) {
         records.computeIfAbsent(turnId, k -> new ArrayList<>()).add(record);
+    }
+
+    private long takeStartedAt(String turnId, String toolName, long fallback) {
+        Map<String, Long> starts = callStartedAt.get(turnId);
+        if (starts == null) return fallback;
+        Long startedAt = starts.remove(toolName);
+        if (starts.isEmpty()) {
+            callStartedAt.remove(turnId, starts);
+        }
+        return startedAt != null ? startedAt : fallback;
+    }
+
+    private void discardStartedAt(String turnId, String toolName) {
+        takeStartedAt(turnId, toolName, 0L);
     }
 
     private static boolean isSearchTool(String name) {

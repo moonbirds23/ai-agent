@@ -161,6 +161,100 @@ class TaskGovernanceTest {
         assertThat(validator.validate(repaired, request).valid()).isTrue();
     }
 
+    @Test
+    void ledgerPreservesToolCallStartAndFinishTime() throws InterruptedException {
+        TaskLedger ledger = new TaskLedger();
+        ledger.beforeCall("turn-timing", "searchGallery", Map.of("query", "snow"));
+        Thread.sleep(15);
+
+        ledger.recordSuccess("turn-timing", "searchGallery", Map.of("query", "snow"),
+                Map.of("resultCount", 1), ToolExecutionRecord.NONE);
+
+        assertThat(ledger.getRecords("turn-timing")).singleElement()
+                .satisfies(record -> {
+                    assertThat(record.finishedAt()).isGreaterThan(record.startedAt());
+                    assertThat(record.elapsedMs()).isGreaterThanOrEqualTo(10);
+                });
+    }
+
+    @Test
+    void ledgerFailurePreservesRecoveryHintAndTiming() throws InterruptedException {
+        TaskLedger ledger = new TaskLedger();
+        ledger.beforeCall("turn-failure", "generateImage", Map.of("prompt", "poster"));
+        Thread.sleep(15);
+
+        ledger.recordFailure("turn-failure", "generateImage",
+                Map.of("prompt", "poster"), "provider unavailable");
+
+        assertThat(ledger.getRecords("turn-failure")).singleElement()
+                .satisfies(record -> {
+                    assertThat(record.success()).isFalse();
+                    assertThat(record.recoverable()).isTrue();
+                    assertThat(record.recoveryHint()).isNotBlank();
+                    assertThat(record.finishedAt()).isGreaterThan(record.startedAt());
+                    assertThat(record.elapsedMs()).isGreaterThanOrEqualTo(10);
+                });
+    }
+
+    @Test
+    void noSaveConstraintRejectsOtherwiseSuccessfulTurnWithGalleryWrite() {
+        VerificationResult initiallySuccessful =
+                VerificationResult.success("已找到候选", Map.of());
+        ToolExecutionRecord forbiddenWrite = ToolExecutionRecord.success(
+                "turn-no-save", "pexelsSearchAndImport", Map.of(),
+                Map.of("pictureId", 42L), ToolExecutionRecord.GALLERY_CREATED);
+
+        VerificationResult result = TaskVerifier.enforceNoSaveConstraint(
+                initiallySuccessful, true, List.of(forbiddenWrite));
+
+        assertThat(result.status()).isEqualTo(TaskStatus.FAILED);
+        assertThat(result.deliverable()).isFalse();
+        assertThat(result.userMessage()).contains("检测到图库写入");
+    }
+
+    @Test
+    void validatorRejectsGalleryWriteStepForNoSaveRequest() {
+        ChatRequest request = request("在 Pexels 找 3 张图片，只返回候选，不保存");
+        TaskPlan invalid = new TaskPlan(
+                "turn-no-save-plan", TaskType.WEB_IMAGE_SEARCH, request.message(),
+                List.of(
+                        TaskStep.of("search", "Search Pexels", true,
+                                "pexelsSearchPhotos"),
+                        TaskStep.of("import", "Import candidate", true,
+                                "pexelsSearchAndImport")),
+                false, false, true, Map.of());
+
+        PlanValidationResult result = validator.validate(invalid, request);
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.errors()).anyMatch(error ->
+                error.contains("No-save request must not contain gallery write step"));
+    }
+
+    @Test
+    void repairDeduplicatesWebImageSearchToolForStableAutoExecution() {
+        ChatRequest request = request(
+                "在 Pexels 找 3 张城市夜景图片，只返回候选，不保存");
+        TaskPlan duplicate = new TaskPlan(
+                "turn-duplicate-pexels", TaskType.WEB_IMAGE_SEARCH,
+                request.message(),
+                List.of(
+                        TaskStep.of("search-1", "Search Pexels", true,
+                                "pexelsSearchPhotos"),
+                        TaskStep.of("search-2", "Search Pexels again", true,
+                                "pexelsSearchPhotos")),
+                false, false, true, Map.of());
+
+        assertThat(validator.validate(duplicate, request).valid()).isFalse();
+
+        TaskPlan repaired = new TaskPlanRepair(validator).repair(duplicate, request);
+
+        assertThat(repaired).isNotNull();
+        assertThat(repaired.steps()).extracting(TaskStep::toolName)
+                .containsExactly("pexelsSearchPhotos");
+        assertThat(validator.validate(repaired, request).valid()).isTrue();
+    }
+
     private static TaskPlan planWithPexelsDependency(ChatRequest request, String turnId) {
         return new TaskPlan(
                 turnId, TaskType.IMAGE_GENERATION, request.message(),

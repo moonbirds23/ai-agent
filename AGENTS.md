@@ -1,5 +1,23 @@
 # AGENTS.md
 
+## AI 工作区入口
+
+开始规划或执行任务前，先阅读 `.ai/README.md`，再按其中的路由只加载与当前任务相关的上下文。
+
+- 稳定项目文档：`docs/`
+- AI 需求、计划、问题与交接：`.ai/`
+- 本地运行产物：`var/`（不提交 Git）
+- 本文件只保留自动加载所需的核心规则；新的过程记录不要继续堆入本文件
+
+### 规划输出规则
+
+- 用户未主动要求完整路线图时，只规划一个能够满足当前需求的阶段，不默认拆成多阶段实施步骤。
+- 当前阶段完成后的内容最多提出 1～2 个展望方向，不能混入当前交付范围。
+- 实施规划保持适度抽象；验证计划必须详细，并主动验证前提、反例、风险和更优替代方案。
+- 涉及新增或替换技术选型时，计划确认前必须联网调研官方文档、官方源码和代表性开源实现，先向用户提交选型分析。
+- 选型分析必须说明候选方案、实现原理、优劣、兼容性、维护状态、风险、成本和对预计需求的满足程度；不得先选定再寻找支持材料。
+- 详细格式见 `.ai/context/planning-output-rules.md`。
+
 This file provides guidance to Codex (Codex.ai/code) when working with code in this repository.
 
 ## 双 AI 协作规则
@@ -429,6 +447,7 @@ public interface ImageGenerationService {
 | **PromptOptimizeAdvisor 无输入时模型幻觉** | 用户发"继续上一个任务"、空描述等无头指令时，DeepSeek 随机猜测主题 | 模型在缺少上下文时自行推测，非记忆污染 | 暂无，后续可在 PromptOptimize 中检测有效需求描述 |
 | **多模态记忆序列化丢失图片引用** | RedisChatMemory 只有 `instanceof String` 分支提取 imageRefs，但 `Media.getData()` 实际类型是 `URI`（URL传图）或 `ByteArrayResource`（base64传图），两者都不匹配 → imageRefs 恒为 null；且 `LocalObjectStorageService.getUrl()` 返回 `/api/gallery/files/{id}` 相对路径，`toMessage()` 中 `new URL(relativePath)` 直接抛 MalformedURLException | `RedisChatMemory.java:90` `toRecord()` 的 `filter(m -> m.getData() instanceof String)` 遗漏了 URI 和 ByteArrayResource 两种类型；`LocalObjectStorageService.java:70-76` `getUrl()` 未补全 baseUrl | 图片分析模式走手动 `chatMemory.add()` 只存纯文本，绕开了此 Bug；已通过 ImageRef 分类型存储（GALLERY/TEXT_DESCRIPTION）修复 |
 | **chat_memory_retrieve_size 不生效** | `PictureApp` 中 `.param("chat_memory_retrieve_size", 10/50)` 传参无效，MCMA 每次从 `ChatMemory.get()` 取全部消息全部注入 Prompt，消息越多 token 消耗越大 | Spring AI 1.0.0 GA 的 `MessageChatMemoryAdvisor` Builder 没有 `chatMemoryRetrieveSize()` 方法，类中也不存在 `CHAT_MEMORY_RETRIEVE_SIZE` 常量——该参数在 GA 版本被移除了，MCMA 的 `before()` 方法不对消息列表做截断 | `RedisChatMemory.get()` 内部改用 `LRANGE key (len-N) (len-1)` 只取最后 N 条，从 Redis 网络层截断 |
+| **MCP SSE 不传播逐调用 W3C Trace Context** | Spring AI 1.0.0 + MCP SDK 0.10.0 的 SSE Transport 在真实 `tools/call` POST 中不携带 `traceparent` / `tracestate`，不能建立严格的跨进程父子 Trace | MCP Client 传输对象在构造期创建并复用请求 Builder，逐调用发送路径没有可靠的 Trace Context 注入点 | MCP Server 创建独立 Trace，通过真实 Span Link 关联主应用 MCP Client Span，并记录 `agent.mcp.trace_context_propagated=false`；不得用业务 ID 冒充父子链。后续可升级框架、替换传输或自定义逐请求注入 |
 
 ## 当前进度
 

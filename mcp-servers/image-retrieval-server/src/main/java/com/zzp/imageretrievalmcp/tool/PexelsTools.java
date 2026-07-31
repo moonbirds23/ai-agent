@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zzp.imageretrievalmcp.contract.PexelsPhotoDTO;
 import com.zzp.imageretrievalmcp.contract.PexelsSearchRequest;
 import com.zzp.imageretrievalmcp.contract.PexelsSearchResponse;
+import com.zzp.imageretrievalmcp.observability.McpServerTelemetry;
 import com.zzp.imageretrievalmcp.pexels.PexelsPhotoService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -23,32 +24,43 @@ public class PexelsTools {
 
     private final PexelsPhotoService pexelsPhotoService;
     private final ObjectMapper objectMapper;
+    private final McpServerTelemetry telemetry;
 
-    public PexelsTools(PexelsPhotoService pexelsPhotoService, ObjectMapper objectMapper) {
+    public PexelsTools(PexelsPhotoService pexelsPhotoService, ObjectMapper objectMapper,
+                       McpServerTelemetry telemetry) {
         this.pexelsPhotoService = pexelsPhotoService;
         this.objectMapper = objectMapper;
+        this.telemetry = telemetry;
     }
 
     @Tool(description = "搜索 Pexels 高质量图库，返回匹配的图片列表及元数据")
     public String pexelsSearchPhotos(
             @ToolParam(description = "搜索关键词，支持中英文") String query,
             @ToolParam(description = "每页返回数量，默认5，最大80") int perPage,
-            @ToolParam(description = "页码，从1开始") int page) {
-        try {
+            @ToolParam(description = "页码，从1开始") int page,
+            @ToolParam(required = false, description = "内部链路关联上下文，请勿由模型设置")
+            String _agent_traceparent) {
+        try (var ignored = telemetry.startToolCall("pexelsSearchPhotos", _agent_traceparent)) {
             PexelsSearchRequest request = new PexelsSearchRequest(query, perPage, page);
             PexelsSearchResponse response = pexelsPhotoService.searchPhotos(request);
             return objectMapper.writeValueAsString(response);
         } catch (Exception e) {
-            log.error("pexelsSearchPhotos failed: query={}", query, e);
+            log.error("pexelsSearchPhotos failed: queryLength={}", query != null ? query.length() : 0, e);
             return "{\"error\":\"" + escapeJson(e.getMessage()) + "\"}";
         }
+    }
+
+    String pexelsSearchPhotos(String query, int perPage, int page) {
+        return pexelsSearchPhotos(query, perPage, page, null);
     }
 
     @Tool(description = "获取 Pexels 精选图片列表")
     public String pexelsCuratedPhotos(
             @ToolParam(description = "每页返回数量，默认5，最大80") int perPage,
-            @ToolParam(description = "页码，从1开始") int page) {
-        try {
+            @ToolParam(description = "页码，从1开始") int page,
+            @ToolParam(required = false, description = "内部链路关联上下文，请勿由模型设置")
+            String _agent_traceparent) {
+        try (var ignored = telemetry.startToolCall("pexelsCuratedPhotos", _agent_traceparent)) {
             PexelsSearchResponse response = pexelsPhotoService.curatedPhotos(perPage, page);
             return objectMapper.writeValueAsString(response);
         } catch (Exception e) {
@@ -57,16 +69,26 @@ public class PexelsTools {
         }
     }
 
+    String pexelsCuratedPhotos(int perPage, int page) {
+        return pexelsCuratedPhotos(perPage, page, null);
+    }
+
     @Tool(description = "获取单张 Pexels 图片的详细信息")
     public String pexelsGetPhoto(
-            @ToolParam(description = "Pexels 图片ID") int photoId) {
-        try {
+            @ToolParam(description = "Pexels 图片ID") int photoId,
+            @ToolParam(required = false, description = "内部链路关联上下文，请勿由模型设置")
+            String _agent_traceparent) {
+        try (var ignored = telemetry.startToolCall("pexelsGetPhoto", _agent_traceparent)) {
             PexelsPhotoDTO response = pexelsPhotoService.getPhoto(photoId);
             return objectMapper.writeValueAsString(response);
         } catch (Exception e) {
             log.error("pexelsGetPhoto failed: photoId={}", photoId, e);
             return "{\"error\":\"" + escapeJson(e.getMessage()) + "\"}";
         }
+    }
+
+    String pexelsGetPhoto(int photoId) {
+        return pexelsGetPhoto(photoId, null);
     }
 
     /**

@@ -1,0 +1,521 @@
+ Agent 核心框架设计
+
+ Context
+
+ 当前 ChatServiceImpl 直接使用 Spring AI ChatClient + .defaultTools() 让模型自主调用工具。这套机制已经支持多步工具调用（Spring AI 内部会自动执行
+ tool → feed result → 继续生成），但缺少以下能力：
+
+ 1. 无状态机：不知道 Agent 当前处于"思考中/执行中/已完成/出错"
+ 2. 无步数限制：模型可能陷入无限工具调用循环
+ 3. 无可观测性：不知道当前在第几步、调用了什么工具、为什么调用
+ 4. System prompt 是指令列表而非推理框架：缺少 ReAct 模式的"思考→行动→观察→再思考"引导
+ 5. 测试困难：复杂多工具编排场景没有专门的测试支持
+
+ 参考项目 yu-ai-agent-master 的核心价值在于：手动 ReAct 循环 + 状态机 + nextStepPrompt 转向引导 + maxSteps 上限 + TerminateTool 退出信号。
+
+ 目标
+
+ 在 Spring AI 1.0.0 框架内，构建一层轻量 Agent 抽象，不重写工具执行循环（Spring AI
+ 已经做得很好了），而是补充：状态管理、步数控制、可观测性、推理引导。
+
+ 核心设计决策
+
+ 决策 1：保留 Spring AI 自动工具执行，文档记录后续可自行实现
+
+ 选择：保持 Spring AI 的自动工具执行，在其上包装 Agent 层。在 CLAUDE.md 中记录手动 ReAct 循环作为后续深入学习方向。
+
+ 理由：
+ - Spring AI 1.0.0 的 ChatClient 已内置多步工具执行（tool call → execute → feed result →
+ continue），且处理了流式/非流式、异常恢复、上下文管理等细节
+ - 当前是学习项目，优先理解框架的标准用法；后续深入学习时可以参考 yu-ai-agent-master 的手动 ReAct 模式（ReActAgent + ToolCallAgent，禁用
+ internalToolExecutionEnabled，自行管理 think→act→observe 循环 + nextStepPrompt 转向引导 + TerminateTool 退出信号）
+ - 在 CLAUDE.md 中记录两种模式的对比和适用场景，作为知识沉淀
+
+ 决策 2：内部重构，ChatServiceImpl 委托给 Agent
+
+ 选择：新增 Agent 类，ChatServiceImpl 构造函数注入 Agent，chat()/chatStream() 委托执行。对外接口（Controller）不变。
+
+ 理由：
+ - 最小化对现有工作的影响，Controller 层无感知
+ - ChatServiceImpl 从"做事情"变为"编排角色"：负责请求预处理（autoSaveToCacheGallery、buildUserSpec、toolContext）→ 委托 Agent →
+ 响应后处理（guardHallucinatedImageResult）
+ - Agent 可独立单元测试（注入 mock ChatClient + mock tools），关注点分离
+ - 后续其他 Service 也可以复用 Agent
+
+ 决策 3：System prompt 从"工具说明书"升级为"ReAct 推理框架"
+
+ 选择：重写 system prompt，增加 Think-Act-Observe 循环引导 + 工具选择策略 + 终止条件。
+
+ 理由：
+ - 当前 prompt 是"有这些工具，这些规则"——模型知道有什么武器但不知道怎么打仗
+ - 参考项目的 nextStepPrompt 模式：每轮追加"请根据当前结果决定下一步"
+ - 我们不需要每轮追加（Spring AI 自动处理），但 system prompt 需要教模型"怎么思考多步问题"
+
+ 架构图
+
+ Controller (不变)
+   └─ ChatServiceImpl (重构：编排角色)
+        ├─ 请求预处理：autoSaveToCacheGallery / buildUserSpec / toolContext
+        ├─ 委托 ↓
+        └─ Agent (新增，核心执行引擎)
+             ├─ AgentState: IDLE → RUNNING → FINISHED/ERROR
+             ├─ AgentConfig: maxSteps, name
+             ├─ AgentRoundAdvisor (新增 Advisor，order=5)
+             │    ├─ before()：计数+限流
+             │    ├─ after()：记录本轮 tool calls
+             │    └─ 超限抛 BusinessException(AGENT_MAX_STEPS_EXCEEDED)
+             ├─ AgentContext (ThreadLocal 可观测性)
+             └─ ChatClient (Spring AI 管理多步工具执行)
+                  └─ 16 个 @Tool 方法（不变）
+
+ Advisor 链：ContentGuard(0) → AgentRound(5) → MCMA(built-in) → Logging(30) → ExceptionGuard(MAX)
+
+ Agent 类
+
+ public class Agent {
+     private final String name;
+     private final AgentState state;        // IDLE/RUNNING/FINISHED/ERROR
+     private final ChatClient chatClient;   // 已配置 tools + advisors
+     private final AgentConfig config;      // maxSteps, systemPrompt
+
+     // 非流式
+     AgentResult run(String userPrompt, String chatId);
+
+     // 流式
+     Flux<AgentStreamEvent> runStream(String userPrompt, String chatId);
+ }
+
+ AgentConfig
+
+ public record AgentConfig(
+     int maxSteps,           // 最大推理步数，默认 10
+     String systemPrompt,    // 增强后的 ReAct system prompt
+     boolean verbose         // 是否输出中间推理过程
+ ) {}
+
+ AgentState
+
+ public enum AgentState {
+     IDLE,       // 就绪
+     RUNNING,    // 执行中（思考/调工具）
+     FINISHED,   // 正常完成
+     ERROR       // 异常终止
+ }
+
+ AgentRoundAdvisor（新增 Advisor）
+
+ - Order: 在 ContentGuard(0) 之后、Logging(30) 之前，建议 order=5
+ - before(): currentRound++；若 currentRound > maxSteps，抛 AgentMaxStepsExceededException（BusinessException 子类，有专用 ErrorCode）
+ - after(): 收集本轮元数据（toolCallNames、duration、tokenCount），写入 AgentContext（ThreadLocal，供测试和日志读取）
+ - 不修改 prompt、不修改 response，纯观测+限流
+
+ AgentContext（ThreadLocal 上下文）
+
+ public class AgentContext {
+     // 当前 Agent 状态
+     AgentState state;
+     // 已执行的轮次
+     int currentRound;
+     // 每轮的工具调用记录
+     List<RoundTrace> traces;
+
+     record RoundTrace(int round, List<String> toolCalls, long durationMs, String observation) {}
+ }
+
+ 涉及文件
+
+ ┌──────────────────────────────────────────┬──────┬───────────────────────────────────────────┐
+ │                   文件                   │ 操作 │                   说明                    │
+ ├──────────────────────────────────────────┼──────┼───────────────────────────────────────────┤
+ │ agent/Agent.java                         │ 新增 │ Agent 核心类，包装 ChatClient             │
+ ├──────────────────────────────────────────┼──────┼───────────────────────────────────────────┤
+ │ agent/AgentConfig.java                   │ 新增 │ 配置 record                               │
+ ├──────────────────────────────────────────┼──────┼───────────────────────────────────────────┤
+ │ agent/AgentState.java                    │ 新增 │ 状态枚举                                  │
+ ├──────────────────────────────────────────┼──────┼───────────────────────────────────────────┤
+ │ agent/AgentContext.java                  │ 新增 │ ThreadLocal 执行上下文                    │
+ ├──────────────────────────────────────────┼──────┼───────────────────────────────────────────┤
+ │ agent/AgentRoundAdvisor.java             │ 新增 │ 轮次计数 + maxSteps 拦截                  │
+ ├──────────────────────────────────────────┼──────┼───────────────────────────────────────────┤
+ │ agent/AgentResult.java                   │ 新增 │ Agent 执行结果 record（含状态+内容+追踪） │
+ ├──────────────────────────────────────────┼──────┼───────────────────────────────────────────┤
+ │ exception/ErrorCode.java                 │ 修改 │ 新增 AGENT_MAX_STEPS(50020)               │
+ ├──────────────────────────────────────────┼──────┼───────────────────────────────────────────┤
+ │ prompts/default/system.st                │ 修改 │ 升级为 ReAct 推理框架                     │
+ ├──────────────────────────────────────────┼──────┼───────────────────────────────────────────┤
+ │ service/impl/ChatServiceImpl.java        │ 修改 │ 委托给 Agent 执行（构造函数注入 Agent）   │
+ ├──────────────────────────────────────────┼──────┼───────────────────────────────────────────┤
+ │ test/.../agent/AgentIntegrationTest.java │ 新增 │ 复杂多工具编排测试                        │
+ └──────────────────────────────────────────┴──────┴───────────────────────────────────────────┘
+
+ System Prompt 改造
+
+ 当前问题
+
+ 当前的 system prompt 是"工具菜单 + 行为守则"：
+ - 列出了每个工具及其描述
+ - 给出了一些规则（"生成图片必须调用 generateImage"）
+ - 3 个 Few-shot 示例
+
+ 缺失：
+ - 多步推理引导：告诉模型"先搜再分析再生成"
+ - 跨源选择策略：什么时候用 Pexels、什么时候用 Bing、什么时候搜本地
+ - 终止条件：什么时候停止
+ - 自我纠错：工具失败后怎么办
+
+ 改造方向
+
+ 新增一个核心段落，放在工具列表之前：
+
+ 【推理框架 — 重要】
+ 面对用户请求，按以下步骤思考：
+
+ 1. 理解意图：用户真正想要什么？（搜图？生成？分析？组合任务？）
+ 2. 制定计划：需要分几步？先做什么后做什么？
+ 3. 逐步执行：
+    - 每轮只调用当前步骤需要的工具
+    - 观察工具返回结果，判断是否需要下一步
+    - 工具失败时尝试替代方案（如 Pexels 搜不到换个词，或尝试 Bing）
+ 4. 总结交付：所有步骤完成后，汇总结果回复用户
+
+ 【工具选择策略】
+ - 找参考图 → 先搜本地图库(searchGallery)，无结果再搜 Pexels(pexelsSearchPhotos)
+ - 找网页资讯 → webSearch + webFetch
+ - 生成新图 → 先搜参考(searchGallery/pexelsSearchPhotos) → 分析风格(analyzeImage/getPictureInfo) → 构造英文Prompt → generateImage
+ - 下载入库 → pexelsSearchAndImport 或 searchAndDownload
+ - 聊灵感/浏览 → pexelsCuratedPhotos
+
+ 【终止条件】
+ - 所有必要的工具已调用完毕且得到了结果 → 汇总回复，不要继续调用工具
+ - 工具调用失败 3 次以上 → 如实告诉用户失败原因，不要循环重试
+ - 用户意图不明确 → 问清楚再行动，不要猜测
+
+ 测试场景设计
+
+ 场景 1：基础单工具调用（回归验证）
+
+ 输入: "分析一下我上传的这张图"
+ 期望: Agent 调 analyzeImage → FINISHED
+ 验证: AgentState=FINISHED, currentRound=1
+
+ 场景 2：串行两阶段（搜参考 → 生图）
+
+ 输入: "参考我图库里的赛博朋克图片，生成一张新的赛博朋克城市夜景"
+ 期望:
+   Round 1: searchGallery("赛博朋克") → 找到 [ID:5] [ID:8]
+   Round 2: getPictureInfo(5) + getPictureInfo(8) → 获取风格信息
+   Round 3: generateImage(prompt, style) → 成功
+   AgentState=FINISHED
+ 验证: traces 中包含 searchGallery → getPictureInfo → generateImage
+
+ 场景 3：跨源搜索对比
+
+ 输入: "帮我找极简建筑摄影的参考图，所有来源都搜一下"
+ 期望:
+   Round 1: searchGallery("极简 建筑") + pexelsSearchPhotos("minimalist architecture") + imageSearch("极简建筑摄影")
+   Round 2: (如果模型认为信息足够) 汇总回复
+ 验证: traces 中包含 3 个搜索工具（可能在同一轮或不同轮）
+
+ 场景 4：工具失败 → 降级
+
+ 输入: "搜索'量子计算机内部结构'的参考图"
+ 期望:
+   Round 1: searchGallery("量子计算机") → 无结果
+   Round 2: pexelsSearchPhotos("quantum computer interior") → 可能无结果
+   Round 3: imageSearch("量子计算机 内部 结构图") → 可能也无满意结果
+   模型回复: "未找到相关图片，建议..."
+ 验证: Agent 没有陷入无限循环，正常终止
+
+ 场景 5：maxSteps 上限拦截
+
+ 构造: 设置 maxSteps=2，输入一个需要多步的任务
+ 输入: "搜索赛博朋克参考图、分析每一张、然后生成一张新的、再和原图对比"
+ 期望:
+   Round 1: 搜索工具
+   Round 2: 部分分析
+   Round 3 → AgentRoundAdvisor 抛 AgentMaxStepsExceededException
+   ExceptionGuard 拦截 → 友好回复 "任务较复杂，请简化需求"
+ 验证: ErrorCode=AGENT_MAX_STEPS, AgentState=ERROR
+
+ 场景 6：多轮对话记忆保持
+
+ Turn 1: "搜索赛博朋克城市参考图"
+   → pexelsSearchPhotos("cyberpunk city")
+ Turn 2: "用第一张参考图的风格生成新图"
+   → 依赖 ChatMemory 记住上一轮搜索结果
+   → generateImage(prompt 中引用参考图特征)
+ 验证: Turn 2 能正确引用 Turn 1 的结果
+
+ 场景 7：全链路端到端
+
+ 输入: "我想做一张'夏日回忆'主题的海报。先帮我找3张夏天海边的参考图，
+       然后分析它们的风格，最后生成一张融合了这些风格的夏日海报。"
+ 期望:
+   Round 1: pexelsSearchPhotos("summer beach ocean sunset", limit=3 → 实际搜索量≥3)
+   Round 2: 分析找到的参考图风格
+   Round 3: generateImage(融合风格的英文prompt)
+   AgentState=FINISHED, traces 完整记录
+
+ 实施步骤
+
+ Step 1: 创建 Agent 核心类（agent/ 包）
+
+ ┌────────────────────────┬──────────────────────────────────────────────┐
+ │          文件          │                     说明                     │
+ ├────────────────────────┼──────────────────────────────────────────────┤
+ │ AgentState.java        │ 枚举：IDLE / RUNNING / FINISHED / ERROR      │
+ ├────────────────────────┼──────────────────────────────────────────────┤
+ │ AgentConfig.java       │ record：maxSteps(默认10)、name、verbose      │
+ ├────────────────────────┼──────────────────────────────────────────────┤
+ │ AgentContext.java      │ ThreadLocal 上下文 + RoundTrace record       │
+ ├────────────────────────┼──────────────────────────────────────────────┤
+ │ AgentResult.java       │ record：state、content、traces、totalRounds  │
+ ├────────────────────────┼──────────────────────────────────────────────┤
+ │ AgentRoundAdvisor.java │ 实现 CallAdvisor + StreamAdvisor，order=5    │
+ ├────────────────────────┼──────────────────────────────────────────────┤
+ │ Agent.java             │ 核心类：run() + runStream()，包装 ChatClient │
+ └────────────────────────┴──────────────────────────────────────────────┘
+
+ Step 2: 修改 ErrorCode
+
+ AGENT_MAX_STEPS_EXCEEDED(50020, "Agent 执行步数超限，请简化需求"),
+
+ Step 3: 重构 ChatServiceImpl
+
+ 重构前：ChatServiceImpl 直接构建 ChatClient + 直接调用 .call()/.stream()
+ 重构后：ChatServiceImpl 编排角色
+   ├─ 构造函数：注入 Agent（Agent 内部持有 ChatClient + Advisor 链）
+   ├─ 请求预处理：autoSaveToCacheGallery / buildUserSpec / toolContext / currentImageContext
+   ├─ 委托 Agent.run() / Agent.runStream()
+   └─ 响应后处理：guardHallucinatedImageResult / ChatResponseVO 构建
+
+ 保持对外接口不变：chat(ChatRequest, chatId) / chatStream(ChatRequest, chatId) 签名不变。
+
+ Step 4: 升级 system prompt
+
+ 修改 prompts/default/system.st：
+ - 在工具列表前插入"推理框架"段落（理解意图→制定计划→逐步执行→总结交付）
+ - 增加工具选择策略（跨源搜索优先级、生成流程）
+ - 增加终止条件（完成后停止、失败不重试超过3次、意图不明先问）
+ - 增加错误处理策略（工具失败降级方案）
+
+ Step 5: 编写集成测试
+
+ 创建 AgentIntegrationTest.java，使用 @ExtendWith(MockitoExtension.class) + @Mock ChatModel，覆盖上述 7 个场景。
+
+ Step 6: 更新 CLAUDE.md
+
+ 在"已知的坑"或新增"架构笔记"条目中记录：
+ - Spring AI 自动工具执行 vs 手动 ReAct 循环的对比
+ - 参考项目 yu-ai-agent-master 的手动实现要点（internalToolExecutionEnabled=false、nextStepPrompt、TerminateTool）
+ - 后续深入学习时可尝试自行实现的方向
+
+ 不做的
+
+ - ❌ 不手动接管 Spring AI 的工具执行循环（用框架标准方式，文档记录手动实现作为后续学习方向）
+ - ❌ 不新增业务工具（PDF、拼图等，后续再引入）
+ - ❌ 不修改前端
+ - ❌ 不提取 MCP 服务
+ - ❌ 不修改现有 16 个 @Tool 方法签名
+ - ❌ 不改变现有 Advisor 链的核心顺序（只在 ContentGuard 之后插入 AgentRoundAdvisor）
+
+ 涉及文件清单
+
+ ┌───────────────────────────────────────────┬──────┬─────────────────────────────────────┐
+ │                   文件                    │ 操作 │                说明                 │
+ ├───────────────────────────────────────────┼──────┼─────────────────────────────────────┤
+ │ agent/Agent.java                          │ 新增 │ 核心执行引擎，包装 ChatClient       │
+ ├───────────────────────────────────────────┼──────┼─────────────────────────────────────┤
+ │ agent/AgentConfig.java                    │ 新增 │ 配置 record                         │
+ ├───────────────────────────────────────────┼──────┼─────────────────────────────────────┤
+ │ agent/AgentState.java                     │ 新增 │ 状态枚举                            │
+ ├───────────────────────────────────────────┼──────┼─────────────────────────────────────┤
+ │ agent/AgentContext.java                   │ 新增 │ ThreadLocal + RoundTrace            │
+     │ │ agent/AgentConfig.java                    │ 新增 │ 配置 record                         │                                                │
+     │ ├───────────────────────────────────────────┼──────┼─────────────────────────────────────┤                                                │
+     │ │ agent/AgentState.java                     │ 新增 │ 状态枚举                            │                                                │
+     │ ├───────────────────────────────────────────┼──────┼─────────────────────────────────────┤                                                │
+     │ │ agent/AgentContext.java                   │ 新增 │ ThreadLocal + RoundTrace            │                                                │
+     │ ├───────────────────────────────────────────┼──────┼─────────────────────────────────────┤                                                │
+     │ │ agent/AgentResult.java                    │ 新增 │ 执行结果 record                     │                                                │
+     │ ├───────────────────────────────────────────┼──────┼─────────────────────────────────────┤                                                │
+     │ │ agent/AgentRoundAdvisor.java              │ 新增 │ 轮次计数 + maxSteps 拦截            │                                                │
+     │ ├───────────────────────────────────────────┼──────┼─────────────────────────────────────┤                                                │
+     │ │ exception/ErrorCode.java                  │ 修改 │ 新增 AGENT_MAX_STEPS_EXCEEDED       │                                                │
+     │ ├───────────────────────────────────────────┼──────┼─────────────────────────────────────┤                                                │
+     │ │ prompts/default/system.st                 │ 修改 │ 升级为 ReAct 推理框架               │                                                │
+     │ ├───────────────────────────────────────────┼──────┼─────────────────────────────────────┤                                                │
+     │ │ service/impl/ChatServiceImpl.java         │ 重构 │ 委托给 Agent，自身变编排角色        │                                                │
+     │ ├───────────────────────────────────────────┼──────┼─────────────────────────────────────┤                                                │
+     │ │ CLAUDE.md                                 │ 修改 │ 记录手动 ReAct 循环作为后续学习方向 │                                                │
+     │ ├───────────────────────────────────────────┼──────┼─────────────────────────────────────┤                                                │
+     │ │ test/.../agent/AgentTest.java             │ 新增 │ Agent 单元测试（mock ChatModel）    │                                                │
+     │ ├───────────────────────────────────────────┼──────┼─────────────────────────────────────┤                                                │
+     │ │ test/.../agent/AgentRoundAdvisorTest.java │ 新增 │ Advisor 单元测试                    │                                                │
+     │ ├───────────────────────────────────────────┼──────┼─────────────────────────────────────┤                                                │
+     │ │ test/.../agent/AgentIntegrationTest.java  │ 新增 │ 7 个复杂场景集成测试                │                                                │
+     │ └───────────────────────────────────────────┴──────┴─────────────────────────────────────┘                                                │
+     │                                                                                                                                           │
+     │ 验证方式                                                                                                                                  │
+     │                                                                                                                                           │
+     │ # 全量单元测试（确保无回归）                                                                                                              │
+     │ JAVA_HOME="D:/develop/java/JDK/jdk-21" mvn test                                                                                           │
+     │                                                                                                                                           │
+     │ # 新测试                                                                                                                                  │
+     │ JAVA_HOME="D:/develop/java/JDK/jdk-21" mvn test -Dtest="com.zzp.aiagent.agent.*"                                                          │
+     │                                                                                                                                           │
+     │ # 启动 + 前端手动测试                                                                                                                     │
+     │ JAVA_HOME="D:/develop/java/JDK/jdk-21" mvn spring-boot:run -Dspring-boot.run.profiles=local                                               │
+     │ # 前端测试场景 1-7                                                                                                                        │
+     ╰───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+> 当前方案改动后的数据流架构是什么
+
+  Thought for 20s, read 1 file (ctrl+o to expand)
+
+● 改动后的数据流架构
+
+  非流式路径对比
+
+  ┌────────── 重构前：ChatServiceImpl 一把抓 ──────────┐
+  │                                                      │
+  │  Controller                                          │
+  │    │ ChatRequest{message, imageBase64, ...}          │
+  │    ▼                                                 │
+  │  ChatServiceImpl.chat()                              │
+  │    ├─ 1. checkLimit()                                │
+  │    ├─ 2. autoSaveToCacheGallery() → GalleryPicture   │
+  │    ├─ 3. bind currentImageContext                    │
+  │    ├─ 4. buildUserSpec() → text + Media             │
+  │    ├─ 5. chatClient.prompt()...call().content()      │
+  │    │     └─ [Spring AI 黑盒：多步工具执行]           │
+  │    ├─ 6. guardHallucinatedImageResult()              │
+  │    └─ return ChatResponseVO                         │
+  │                                                      │
+  │  ChatClient 由 ChatServiceImpl 直接构建和持有        │
+  │  Advisor 链在 ChatServiceImpl 构造时硬编码           │
+  └──────────────────────────────────────────────────────┘
+
+  ┌────────── 重构后：ChatServiceImpl 编排 + Agent 执行 ──────────┐
+  │                                                                │
+  │  Controller                                                    │
+  │    │ ChatRequest{message, imageBase64, ...}                    │
+  │    ▼                                                           │
+  │  ChatServiceImpl.chat()          ← 编排角色                    │
+  │    │                                                           │
+  │    ├─ ── 预处理层（ChatServiceImpl 职责）──                    │
+  │    │   1. checkLimit(chatId)                                   │
+  │    │   2. autoSaveToCacheGallery() → GalleryPicture saved      │
+  │    │   3. bind currentImageContext(turnId, base64)             │
+  │    │   4. createMedia(saved, base64, url) → Media              │
+  │    │   5. buildSelectedReferenceContext(ids) → String          │
+  │    │   6. build toolContext Map                                │
+  │    │                                                           │
+  │    ├─ ── 委托层 ──                                             │
+  │    │   Agent.run(UserPrompt{text, media, toolContext, chatId}) │
+  │    │   │                                                       │
+  │    │   ├─ AgentContext.init(IDLE→RUNNING)                      │
+  │    │   │                                                       │
+  │    │   ├─ chatClient.prompt()                                  │
+  │    │   │   .user(text).media(media)                            │
+  │    │   │   .toolContext(toolContext)                            │
+  │    │   │   .advisors(params)                                   │
+  │    │   │   .call()                                             │
+  │    │   │   │                                                   │
+  │    │   │   └─ Spring AI 多步工具执行循环 ──┐                   │
+  │    │   │       │                            │                   │
+  │    │   │       ▼                            ▼                   │
+  │    │   │   ContentGuard(0)          AgentRound(5)              │
+  │    │   │   "敏感词检查"              "round++ / maxSteps检查"   │
+  │    │   │       │                            │                   │
+  │    │   │       ▼                            ▼                   │
+  │    │   │   MCMA(built-in)           Logging(30)                │
+  │    │   │   "注入历史消息"            "请求/响应日志"             │
+  │    │   │       │                            │                   │
+  │    │   │       ▼                            ▼                   │
+  │    │   │   [LLM 推理]               ExceptionGuard(MAX)        │
+  │    │   │   [Tool 调用]              "BusinessException→友好回复" │
+  │    │   │   [Tool 执行] ← 16个@Tool                             │
+  │    │   │   [结果回注]                                          │
+  │    │   │   [继续推理 or 完成]                                   │
+  │    │   │                                                       │
+  │    │   ├─ AgentContext.finish(RUNNING→FINISHED)                │
+  │    │   └─ return AgentResult{content, traces, totalRounds}     │
+  │    │                                                           │
+  │    ├─ ── 后处理层（ChatServiceImpl 职责）──                    │
+  │    │   7. toolProgressContext.snapshot(turnId)                 │
+  │    │   8. guardHallucinatedImageResult(response, trace)        │
+  │    │   9. build ChatResponseVO.textOnly / .imageGenerated      │
+  │    │                                                           │
+  │    └─ return ChatResponseVO                                    │
+  │                                                                │
+  │  Agent 独立持有 ChatClient + Advisor 链                        │
+  │  ChatServiceImpl 不碰 ChatClient，只做预处理 + 后处理           │
+  └────────────────────────────────────────────────────────────────┘
+
+  流式路径（同理）
+
+  ChatServiceImpl.chatStream()
+    │
+    ├─ 预处理（同非流式）
+    │   1. checkLimit  2. autoSave  3. bindContext  4. createMedia  5. buildToolContext
+    │
+    ├─ 委托 Agent.runStream(userPrompt)
+    │   │
+    │   ├─ AgentContext.init(RUNNING)
+    │   ├─ chatClient.prompt()...stream().chatClientResponse()
+    │   │   └─ Flux<ChatClientResponse>
+    │   │       ├─ ChatResponse{hasToolCalls} → StreamEventVO.toolCall()
+    │   │       ├─ ChatResponse{text}         → StreamEventVO.token()
+    │   │       └─ Advisor 链同非流式
+    │   ├─ AgentContext.finish(FINISHED)
+    │   └─ return Flux<StreamEventVO>
+    │
+    ├─ 后处理
+    │   6. accumulator → guardHallucinatedImageResult
+    │   7. StreamEventVO.done(chatId, ChatResponseVO)
+    │
+    └─ return Flux<StreamEventVO> (含 chatId + progress + token + done + error)
+
+  职责边界
+
+  ┌─────────────────────────────────────────────────────────┐
+  │                     职责边界                             │
+  ├────────────────────┬────────────────┬───────────────────┤
+  │   ChatServiceImpl  │     Agent      │   Spring AI       │
+  │   (编排角色)        │   (执行引擎)    │   (框架能力)       │
+  ├────────────────────┼────────────────┼───────────────────┤
+  │ • 请求预处理        │ • 状态管理      │ • 工具 Schema 生成 │
+  │   - 图片入库        │ • 步数控制      │ • 多步工具执行循环  │
+  │   - Media 构造      │ • 可观测性      │ • 流式/非流式分发   │
+  │   - 参考图上下文     │ • ChatClient   │ • 消息历史管理     │
+  │                    │   生命周期       │ • 异常恢复         │
+  │ • 响应后处理        │ • Advisor 链   │                   │
+  │   - 幻觉拦截        │   组装          │                   │
+  │   - VO 构建         │                │                   │
+  │   - 生图检测        │                │                   │
+  ├────────────────────┼────────────────┼───────────────────┤
+  │ 依赖：              │ 依赖：          │ 依赖：             │
+  │ • GalleryService   │ • ChatModel    │ • @Tool 注解       │
+  │ • ChatMediaService │ • ChatMemory   │ • Advisor 接口     │
+  │ • CurrentImageCtx  │ • ToolCallbacks│                   │
+  │ • ToolProgressCtx  │                │                   │
+  │ • ConversationSvc  │                │                   │
+  └────────────────────┴────────────────┴───────────────────┘
+
+  关键变化总结
+
+  ┌─────────────────┬───────────────────────────────────────┬────────────────────────────────────────┐
+  │      维度       │                重构前                 │                 重构后                 │
+  ├─────────────────┼───────────────────────────────────────┼────────────────────────────────────────┤
+  │ ChatClient 归属 │ ChatServiceImpl 直接构建和持有        │ Agent 持有，ChatServiceImpl 不感知     │
+  ├─────────────────┼───────────────────────────────────────┼────────────────────────────────────────┤
+  │ Advisor 链组装  │ ChatServiceImpl 构造函数中硬编码      │ Agent 构造函数中组装，可配置           │
+  ├─────────────────┼───────────────────────────────────────┼────────────────────────────────────────┤
+  │ 状态追踪        │ 无（依赖 ToolProgressContext 事后查） │ AgentContext（执行中实时追踪）         │
+  ├─────────────────┼───────────────────────────────────────┼────────────────────────────────────────┤
+  │ 步数上限        │ 无（依赖 Spring AI 内部终止逻辑）     │ AgentRoundAdvisor 在每轮 before() 检查 │
+  ├─────────────────┼───────────────────────────────────────┼────────────────────────────────────────┤
+  │ 测试粒度        │ 只能测 ChatServiceImpl 整体           │ Agent 可独立单测（mock ChatModel）     │
+  ├─────────────────┼───────────────────────────────────────┼────────────────────────────────────────┤
+  │ 复用性          │ 零（ChatServiceImpl 专属）            │ Agent 可被其他 Service 复用            │

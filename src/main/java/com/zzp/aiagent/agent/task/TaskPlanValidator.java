@@ -108,6 +108,8 @@ public class TaskPlanValidator {
         boolean hasAnySearch = plan.steps().stream()
                 .anyMatch(step -> isSearchTool(step.toolName()));
         boolean explicitlyCombinesSearchAndGeneration = asksGeneration && asksAnySearch;
+        boolean asksNoSave = containsAny(text,
+                "不保存", "不要保存", "只返回候选", "do not save", "don't save");
 
         if (asksGeneration && !hasGeneration) {
             errors.add("User requests image generation but plan lacks generateImage step");
@@ -126,6 +128,34 @@ public class TaskPlanValidator {
                     .filter(step -> !step.required())
                     .forEach(step -> errors.add(
                             "Explicit workflow step must be required: " + step.code()));
+        }
+        if (plan.taskType() == TaskType.WEB_IMAGE_SEARCH) {
+            List<TaskStep> searchSteps = plan.steps().stream()
+                    .filter(step -> isSearchTool(step.toolName()))
+                    .toList();
+            if (searchSteps.isEmpty()) {
+                errors.add("WEB_IMAGE_SEARCH plan must contain a search tool step");
+            }
+            searchSteps.stream()
+                    .filter(step -> !step.required())
+                    .forEach(step -> errors.add(
+                            "WEB_IMAGE_SEARCH tool step must be required: " + step.code()));
+            searchSteps.stream()
+                    .collect(java.util.stream.Collectors.groupingBy(
+                            TaskStep::toolName, java.util.LinkedHashMap::new,
+                            java.util.stream.Collectors.counting()))
+                    .forEach((toolName, count) -> {
+                        if (count > 1) {
+                            errors.add("WEB_IMAGE_SEARCH must not duplicate search tool: "
+                                    + toolName);
+                        }
+                    });
+        }
+        if (asksNoSave) {
+            plan.steps().stream()
+                    .filter(step -> isDownloadTool(step.toolName()))
+                    .forEach(step -> errors.add(
+                            "No-save request must not contain gallery write step: " + step.code()));
         }
         if (asksGallerySearch && asksGeneration && !hasGallerySearch) {
             errors.add("User requests gallery search before generation but plan lacks searchGallery step");
