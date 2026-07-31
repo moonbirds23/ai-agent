@@ -3,7 +3,10 @@ package com.zzp.imageretrievalmcp.tool;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zzp.imageretrievalmcp.contract.PexelsPhotoDTO;
 import com.zzp.imageretrievalmcp.contract.PexelsSearchResponse;
+import com.zzp.imageretrievalmcp.observability.McpServerTelemetry;
 import com.zzp.imageretrievalmcp.pexels.PexelsPhotoService;
+import io.opentelemetry.api.OpenTelemetry;
+import org.springframework.beans.factory.support.DefaultListableBeanFactory;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -27,12 +30,14 @@ class PexelsToolsTest {
     private PexelsPhotoService pexelsPhotoService;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
+    private final McpServerTelemetry telemetry = new McpServerTelemetry(
+            new DefaultListableBeanFactory().getBeanProvider(OpenTelemetry.class));
 
     @Test
     void pexelsSearchPhotosShouldReturnValidJson() throws Exception {
         // Since @InjectMocks doesn't handle the ObjectMapper constructor arg,
         // recreate the tool with mock + real ObjectMapper
-        PexelsTools tools = new PexelsTools(pexelsPhotoService, objectMapper);
+        PexelsTools tools = new PexelsTools(pexelsPhotoService, objectMapper, telemetry);
 
         PexelsPhotoDTO.PhotoSrc src = new PexelsPhotoDTO.PhotoSrc(
                 "https://example.com/1.jpg", "", "", "", "", "", "", "");
@@ -61,7 +66,7 @@ class PexelsToolsTest {
 
     @Test
     void pexelsCuratedPhotosShouldReturnValidJson() throws Exception {
-        PexelsTools tools = new PexelsTools(pexelsPhotoService, objectMapper);
+        PexelsTools tools = new PexelsTools(pexelsPhotoService, objectMapper, telemetry);
 
         PexelsSearchResponse mockResponse = new PexelsSearchResponse(
                 "1.0", "req-456", "pexels", null,
@@ -80,7 +85,7 @@ class PexelsToolsTest {
 
     @Test
     void pexelsGetPhotoShouldReturnValidJson() throws Exception {
-        PexelsTools tools = new PexelsTools(pexelsPhotoService, objectMapper);
+        PexelsTools tools = new PexelsTools(pexelsPhotoService, objectMapper, telemetry);
 
         PexelsPhotoDTO.PhotoSrc src = new PexelsPhotoDTO.PhotoSrc(
                 "https://example.com/999.jpg", "", "", "", "", "", "", "");
@@ -104,7 +109,7 @@ class PexelsToolsTest {
 
     @Test
     void pexelsSearchPhotosShouldReturnErrorJsonOnException() throws Exception {
-        PexelsTools tools = new PexelsTools(pexelsPhotoService, objectMapper);
+        PexelsTools tools = new PexelsTools(pexelsPhotoService, objectMapper, telemetry);
 
         when(pexelsPhotoService.searchPhotos(any()))
                 .thenThrow(new RuntimeException("Network timeout"));
@@ -119,7 +124,7 @@ class PexelsToolsTest {
 
     @Test
     void pexelsGetPhotoShouldReturnErrorJsonOnException() throws Exception {
-        PexelsTools tools = new PexelsTools(pexelsPhotoService, objectMapper);
+        PexelsTools tools = new PexelsTools(pexelsPhotoService, objectMapper, telemetry);
 
         when(pexelsPhotoService.getPhoto(404))
                 .thenThrow(new RuntimeException("Photo not found"));
@@ -133,7 +138,7 @@ class PexelsToolsTest {
 
     @Test
     void pexelsSearchPhotosShouldEscapeSpecialCharsInErrorMessage() throws Exception {
-        PexelsTools tools = new PexelsTools(pexelsPhotoService, objectMapper);
+        PexelsTools tools = new PexelsTools(pexelsPhotoService, objectMapper, telemetry);
 
         when(pexelsPhotoService.searchPhotos(any()))
                 .thenThrow(new RuntimeException("Error with \"quotes\" and \\backslash"));

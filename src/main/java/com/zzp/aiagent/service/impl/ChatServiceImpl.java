@@ -12,7 +12,9 @@ import com.zzp.aiagent.agent.task.StepStatus;
 import com.zzp.aiagent.agent.task.TaskLedger;
 import com.zzp.aiagent.agent.task.TaskPlan;
 import com.zzp.aiagent.agent.task.TaskPromptBuilder;
+import com.zzp.aiagent.agent.task.TaskStep;
 import com.zzp.aiagent.agent.task.TaskType;
+import com.zzp.aiagent.agent.task.TaskVerifier;
 import com.zzp.aiagent.agent.task.ToolExecutionRecord;
 import com.zzp.aiagent.agent.task.VerificationResult;
 import com.zzp.aiagent.common.ThrowUtils;
@@ -34,6 +36,7 @@ import com.zzp.aiagent.memory.MemoryWriter;
 import com.zzp.aiagent.observability.AgentObservationKeys;
 import com.zzp.aiagent.observability.AgentObservationNames;
 import com.zzp.aiagent.observability.AgentTelemetry;
+import com.zzp.aiagent.observability.DemoCaseContext;
 import com.zzp.aiagent.service.ChatMediaService;
 import com.zzp.aiagent.service.ChatService;
 import com.zzp.aiagent.service.ConversationLimitService;
@@ -56,7 +59,11 @@ import reactor.core.publisher.Sinks;
 import reactor.core.publisher.SignalType;
 
 import java.time.Duration;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.Base64;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -144,7 +151,7 @@ public class ChatServiceImpl implements ChatService {
     @Override
     public ChatResponseVO chat(ChatRequest request, String chatId) {
         String turnId = newTurnId(chatId);
-        AgentTelemetry.AgentObservation turn = turnObservation(chatId, turnId);
+        AgentTelemetry.AgentObservation turn = turnObservation(chatId, turnId, request);
         try (Observation.Scope ignored = turn.openScope()) {
             return chatObserved(request, chatId, turnId, turn);
         } catch (RuntimeException e) {
@@ -177,10 +184,14 @@ public class ChatServiceImpl implements ChatService {
             AgentResult result = workflowEngine.execute(input, plan);
             String response = result.state() == AgentState.ERROR ? result.content() : result.content();
             String effectiveResponse = executePlannedFallbackIfNeeded(plan, turnId, response);
-            String safeResponse = verifyComposeAndRecover(effectiveResponse, turnId);
+            String safeResponse = verifyComposeAndRecover(
+                    effectiveResponse, turnId, request, plan);
             VerificationResult verification = taskLedger.getVerification(turnId);
             turn.lowCardinality(AgentObservationKeys.Low.OUTCOME,
-                    result.state() == AgentState.ERROR ? "error" : "success");
+                            result.state() == AgentState.ERROR ? "error" : "success")
+                    .lowCardinality(AgentObservationKeys.Low.TASK_OUTCOME,
+                            verification != null && verification.deliverable()
+                                    ? "completed" : "failed");
             writeTrustedMemoryObserved(chatId, turnId, rawUserText, safeResponse, verification,
                     request.referencePictureIds());
 
@@ -203,7 +214,7 @@ public class ChatServiceImpl implements ChatService {
     public Flux<StreamEventVO> chatStream(ChatRequest request, String chatId) {
         return Flux.defer(() -> {
             String turnId = newTurnId(chatId);
-            AgentTelemetry.AgentObservation turn = turnObservation(chatId, turnId);
+            AgentTelemetry.AgentObservation turn = turnObservation(chatId, turnId, request);
             long startedNanos = System.nanoTime();
             AtomicBoolean firstToken = new AtomicBoolean();
             AtomicBoolean failed = new AtomicBoolean();
@@ -220,8 +231,13 @@ public class ChatServiceImpl implements ChatService {
                     .doOnNext(event -> {
                         if ("token".equals(event.type()) && firstToken.compareAndSet(false, true)) {
                             Duration ttft = Duration.ofNanos(System.nanoTime() - startedNanos);
-                            turn.event("response.first_token");
+                            turn.highCardinality(
+                                            AgentObservationKeys.High.HTTP_TIME_TO_FIRST_SSE_TOKEN_MS,
+                                            ttft.toMillis())
+                                    .event("agent.http.first_sse_token");
                             telemetry.record("agent.response.time.to.first.token", ttft,
+                                    AgentObservationKeys.Low.OUTCOME, "success");
+                            telemetry.record("agent.http.time.to.first.sse.token", ttft,
                                     AgentObservationKeys.Low.OUTCOME, "success");
                         }
                     })
@@ -294,7 +310,7 @@ public class ChatServiceImpl implements ChatService {
         Flux<StreamEventVO> doneEvent = Flux.defer(() -> {
             String fullText = accumulator.toString();
             String effectiveText = executePlannedFallbackIfNeeded(plan, turnId, fullText);
-            String safeText = verifyComposeAndRecover(effectiveText, turnId);
+            String safeText = verifyComposeAndRecover(effectiveText, turnId, request, plan);
             VerificationResult verification = taskLedger.getVerification(turnId);
             writeTrustedMemoryObserved(chatId, turnId, rawUserText, safeText, verification,
                     request.referencePictureIds());
@@ -425,8 +441,14 @@ public class ChatServiceImpl implements ChatService {
                 .highCardinality(AgentObservationKeys.High.TURN_ID, turnId);
         try (Observation.Scope ignored = observation.openScope()) {
             writeTrustedMemoryInternal(chatId, rawUserText, safeResponse, verification, referenceIds);
+            boolean written = verification != null && verification.deliverable();
             observation.lowCardinality(AgentObservationKeys.Low.OUTCOME,
-                    verification != null && verification.deliverable() ? "written" : "skipped");
+                            written ? "written" : "skipped")
+                    .lowCardinality(AgentObservationKeys.Low.MEMORY_WRITE, written)
+                    .lowCardinality(AgentObservationKeys.Low.MEMORY_WRITE_REASON,
+                            written ? "verified" : "verification_failed")
+                    .highCardinality(AgentObservationKeys.High.MEMORY_MESSAGE_COUNT,
+                            written ? 2 : 0);
         } catch (RuntimeException e) {
             observation.error(e);
             throw e;
@@ -445,7 +467,8 @@ public class ChatServiceImpl implements ChatService {
         }
     }
 
-    private String verifyComposeAndRecover(String modelResponse, String turnId) {
+    private String verifyComposeAndRecover(String modelResponse, String turnId,
+                                           ChatRequest request, TaskPlan plan) {
         AgentTelemetry.AgentObservation verifier = telemetry.start(AgentObservationNames.VERIFIER)
                 .highCardinality(AgentObservationKeys.High.TURN_ID, turnId);
         String composed;
@@ -453,10 +476,43 @@ public class ChatServiceImpl implements ChatService {
         try (Observation.Scope ignored = verifier.openScope()) {
             composed = ResponseComposer.composeVerified(modelResponse, taskLedger, turnId);
             verification = taskLedger.getVerification(turnId);
+            List<ToolExecutionRecord> records = taskLedger.getRecords(turnId);
+            boolean noSaveRequested = Boolean.FALSE.equals(request.saveGeneratedToGallery())
+                    || containsNoSaveRequest(request.message());
+            VerificationResult constrained = TaskVerifier.enforceNoSaveConstraint(
+                    verification, noSaveRequested, records);
+            if (constrained != verification) {
+                verification = constrained;
+                taskLedger.completeVerification(turnId, verification);
+                composed = ResponseComposer.compose(modelResponse, verification);
+            }
+            long requiredSteps = plan.steps().stream()
+                    .filter(TaskStep::required)
+                    .filter(step -> step.toolName() != null)
+                    .count();
+            long completedRequiredSteps = plan.steps().stream()
+                    .filter(TaskStep::required)
+                    .filter(step -> step.toolName() != null)
+                    .filter(step -> records.stream().anyMatch(record ->
+                            record.success() && step.toolName().equals(record.toolName())))
+                    .count();
             verifier.lowCardinality(AgentObservationKeys.Low.VERIFICATION_STATUS,
                     verification != null
                             ? verification.status().name().toLowerCase(java.util.Locale.ROOT)
-                            : "unavailable");
+                            : "unavailable")
+                    .lowCardinality(AgentObservationKeys.Low.VERIFY_VERDICT,
+                            verificationVerdict(verification))
+                    .lowCardinality(AgentObservationKeys.Low.VERIFY_NO_SAVE,
+                            noSaveVerdict(request, records))
+                    .lowCardinality(AgentObservationKeys.Low.VERIFY_RESULT_COUNT,
+                            resultCountVerdict(plan, records))
+                    .highCardinality(AgentObservationKeys.High.VERIFY_REQUIRED_STEP_COUNT,
+                            requiredSteps)
+                    .highCardinality(
+                            AgentObservationKeys.High.VERIFY_COMPLETED_REQUIRED_STEP_COUNT,
+                            completedRequiredSteps)
+                    .highCardinality(AgentObservationKeys.High.VERIFY_EVIDENCE_COUNT,
+                            records.size());
         } catch (RuntimeException e) {
             verifier.error(e);
             throw e;
@@ -487,10 +543,77 @@ public class ChatServiceImpl implements ChatService {
         }
     }
 
-    private AgentTelemetry.AgentObservation turnObservation(String chatId, String turnId) {
-        return telemetry.start(AgentObservationNames.TURN)
+    private AgentTelemetry.AgentObservation turnObservation(
+            String chatId, String turnId, ChatRequest request) {
+        String message = request.message() != null ? request.message() : "";
+        AgentTelemetry.AgentObservation observation = telemetry.start(AgentObservationNames.TURN)
                 .highCardinality(AgentObservationKeys.High.CHAT_ID, chatId)
-                .highCardinality(AgentObservationKeys.High.TURN_ID, turnId);
+                .highCardinality(AgentObservationKeys.High.TURN_ID, turnId)
+                .highCardinality(AgentObservationKeys.High.REQUEST_CONTENT_LENGTH,
+                        message.length())
+                .highCardinality(AgentObservationKeys.High.REQUEST_CONTENT_HASH,
+                        sha256(message))
+                .lowCardinality(AgentObservationKeys.Low.REQUEST_CONTENT_CAPTURED, false)
+                .lowCardinality(AgentObservationKeys.Low.REQUEST_MODE,
+                        request.mode() != null ? request.mode() : ChatRequest.MODE_AUTO);
+        String demoCaseId = DemoCaseContext.current();
+        if (demoCaseId != null) {
+            observation.highCardinality(AgentObservationKeys.High.DEMO_CASE_ID, demoCaseId);
+        }
+        return observation;
+    }
+
+    private static String verificationVerdict(VerificationResult verification) {
+        if (verification == null) {
+            return "fail";
+        }
+        return switch (verification.status()) {
+            case SUCCESS -> "pass";
+            case PARTIAL_SUCCESS -> "partial";
+            default -> "fail";
+        };
+    }
+
+    private static String noSaveVerdict(ChatRequest request, List<ToolExecutionRecord> records) {
+        if (!Boolean.FALSE.equals(request.saveGeneratedToGallery())
+                && !containsNoSaveRequest(request.message())) {
+            return "not_applicable";
+        }
+        boolean galleryWrite = records.stream().anyMatch(record ->
+                record.sideEffect() != null && record.sideEffect().startsWith("GALLERY_"));
+        return galleryWrite ? "fail" : "pass";
+    }
+
+    private static boolean containsNoSaveRequest(String message) {
+        if (message == null) {
+            return false;
+        }
+        String normalized = message.toLowerCase(java.util.Locale.ROOT);
+        return normalized.contains("不保存") || normalized.contains("不要保存")
+                || normalized.contains("do not save") || normalized.contains("don't save");
+    }
+
+    private static String resultCountVerdict(TaskPlan plan, List<ToolExecutionRecord> records) {
+        if (plan.taskType() != TaskType.WEB_IMAGE_SEARCH) {
+            return "not_applicable";
+        }
+        boolean hasResults = records.stream()
+                .filter(ToolExecutionRecord::success)
+                .map(record -> record.output().get("candidateCount"))
+                .filter(Number.class::isInstance)
+                .map(Number.class::cast)
+                .anyMatch(count -> count.intValue() > 0);
+        return hasResults ? "pass" : "fail";
+    }
+
+    private static String sha256(String value) {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256")
+                    .digest(value.getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(digest);
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 is required by the JVM", e);
+        }
     }
 
     private static String newTurnId(String chatId) {

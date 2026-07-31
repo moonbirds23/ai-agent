@@ -12,14 +12,17 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.ChatClientResponse;
 import org.springframework.ai.chat.model.ChatModel;
+import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
 
 import java.util.Map;
+import java.util.List;
 import com.zzp.aiagent.tool.GalleryAgentTools;
 import com.zzp.aiagent.tool.PexelsSearchTools;
 import com.zzp.aiagent.tool.WebSearchTools;
+import com.zzp.aiagent.agent.task.TaskStep;
 
 @Slf4j
 @Component
@@ -50,10 +53,11 @@ public class SpringAiAutoToolExecutor implements AgentExecutor {
     public AgentResult execute(AgentInput input) {
         log.debug("[AutoExecutor] execute chatId={}", input.chatId());
         try {
-            var request = chatClient.prompt();
+            ChatClient.ChatClientRequestSpec request = chatClient.prompt();
             if (!input.memoryMessages().isEmpty()) {
                 request.messages(input.memoryMessages());
             }
+            request = requireValidatedToolCall(request, input);
             String content = request
                     .user(spec -> {
                         spec.text(input.modelInput());
@@ -75,6 +79,31 @@ public class SpringAiAutoToolExecutor implements AgentExecutor {
             log.error("[AutoExecutor] error chatId={}: {}", input.chatId(), e.getMessage());
             return new AgentResult(AgentState.ERROR, e.getMessage(), null);
         }
+    }
+
+    /**
+     * A validated plan with exactly one required tool is an execution contract,
+     * not a suggestion. Requiring a tool call at the model API prevents a model
+     * from returning plausible prose without producing backend-verifiable
+     * evidence. Multi-tool and optional-tool plans keep the model default.
+     */
+    private ChatClient.ChatClientRequestSpec requireValidatedToolCall(
+            ChatClient.ChatClientRequestSpec request, AgentInput input) {
+        if (input.plan() == null || input.plan().steps() == null) {
+            return request;
+        }
+        List<String> requiredTools = input.plan().steps().stream()
+                .filter(TaskStep::required)
+                .map(TaskStep::toolName)
+                .filter(name -> name != null && !name.isBlank())
+                .distinct()
+                .toList();
+        if (requiredTools.size() != 1) {
+            return request;
+        }
+        return request.options(OpenAiChatOptions.builder()
+                .toolChoice("required")
+                .build());
     }
 
     @Override

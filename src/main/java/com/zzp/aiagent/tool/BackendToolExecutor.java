@@ -167,9 +167,33 @@ public class BackendToolExecutor implements ToolExecutor {
         progressContext.recordGeneratedImage(turnId, new ImageGeneratedEventVO(
                 result.imageUrl(), result.imageBase64(), prompt, result.revisedPrompt(),
                 style, dimensions, result.metadata()));
+        Map<String, Object> verifiedInput = new LinkedHashMap<>();
+        verifiedInput.put("prompt", prompt);
+        verifiedInput.put("style", style);
+        verifiedInput.put("dimensions", dimensions);
+        verifiedInput.put("referencePictureIds", referencedPictureIds(context));
         return ToolExecutionRecord.success(turnId, "generateImage",
-                Map.of("prompt", prompt, "style", style, "dimensions", dimensions),
+                verifiedInput,
                 output, ToolExecutionRecord.IMAGE_GENERATED);
+    }
+
+    private static List<Long> referencedPictureIds(ToolExecutionContext context) {
+        return context.completedRecords().stream()
+                .filter(record -> record.success() && "searchGallery".equals(record.toolName()))
+                .map(record -> record.output().get("pictureIds"))
+                .filter(Iterable.class::isInstance)
+                .map(Iterable.class::cast)
+                .flatMap(ids -> {
+                    List<Long> values = new java.util.ArrayList<>();
+                    ids.forEach(id -> {
+                        if (id instanceof Number number) {
+                            values.add(number.longValue());
+                        }
+                    });
+                    return values.stream();
+                })
+                .distinct()
+                .toList();
     }
 
     private ToolExecutionRecord searchPexels(String turnId, Map<String, Object> input,

@@ -13,6 +13,7 @@ import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.time.Duration;
 import java.util.UUID;
@@ -36,6 +37,8 @@ public class McpToolInvoker {
      * MCP server (configured via {@code spring.ai.mcp.server.name}).
      */
     static final String SERVER_NAME = "image-retrieval-server";
+    static final String LINK_TRACEPARENT_ARGUMENT = "_agent_traceparent";
+    private static final ThreadLocal<AttemptState> ATTEMPTS = new ThreadLocal<>();
 
     private final List<McpSyncClient> mcpClients;
     private final ObjectMapper objectMapper;
@@ -59,19 +62,29 @@ public class McpToolInvoker {
     public String callTool(String toolName, Map<String, Object> arguments) {
         long startedAt = System.nanoTime();
         String parentSpanId = telemetry.currentSpanId();
-        String logicalToolCallId = parentSpanId != null && !parentSpanId.isBlank()
-                ? parentSpanId
-                : UUID.randomUUID().toString();
+        AttemptState previous = ATTEMPTS.get();
+        int attempt = previous != null && previous.parentSpanId().equals(parentSpanId)
+                ? previous.attempt() + 1 : 1;
+        ATTEMPTS.set(new AttemptState(parentSpanId, attempt));
+        String logicalToolCallId = UUID.randomUUID().toString();
         AgentTelemetry.AgentObservation observation = telemetry.start(AgentObservationNames.MCP_CALL)
                 .lowCardinality(AgentObservationKeys.Low.TOOL_NAME, toolName)
                 .lowCardinality(AgentObservationKeys.Low.MCP_SERVER_NAME, SERVER_NAME)
                 .lowCardinality(AgentObservationKeys.Low.MCP_TRANSPORT, "sse")
-                .highCardinality(AgentObservationKeys.High.TOOL_CALL_ID, logicalToolCallId);
+                .lowCardinality(AgentObservationKeys.Low.MCP_TRACE_CONTEXT_PROPAGATED, false)
+                .highCardinality(AgentObservationKeys.High.TOOL_CALL_ID, logicalToolCallId)
+                .highCardinality(AgentObservationKeys.High.TOOL_ATTEMPT, attempt);
         try (var ignored = observation.openScope()) {
             McpSyncClient client = resolveClient();
             log.debug("[McpToolInvoker] Calling tool '{}' argumentCount={}",
                     toolName, arguments != null ? arguments.size() : 0);
-            McpSchema.CallToolRequest request = new McpSchema.CallToolRequest(toolName, arguments);
+            Map<String, Object> transportedArguments = new LinkedHashMap<>(
+                    arguments != null ? arguments : Map.of());
+            String traceparent = telemetry.currentTraceParent();
+            if (traceparent != null) {
+                transportedArguments.put(LINK_TRACEPARENT_ARGUMENT, traceparent);
+            }
+            McpSchema.CallToolRequest request = new McpSchema.CallToolRequest(toolName, transportedArguments);
             McpSchema.CallToolResult result = client.callTool(request);
             if (Boolean.TRUE.equals(result.isError())) {
                 String errorText = extractTextContent(result);
@@ -88,12 +101,19 @@ public class McpToolInvoker {
                         "MCP 工具返回空内容：" + toolName);
             }
 
-            observation.lowCardinality(AgentObservationKeys.Low.OUTCOME, "success");
+            observation.highCardinality(AgentObservationKeys.High.MCP_RESULT_COUNT,
+                    resultCount(text));
+            observation.lowCardinality(AgentObservationKeys.Low.OUTCOME, "success")
+                    .lowCardinality(AgentObservationKeys.Low.TOOL_OUTCOME, "success");
+            ATTEMPTS.remove();
             recordMcpMetrics(toolName, "success", startedAt);
             log.debug("[McpToolInvoker] Tool call succeeded: tool={}, responseLength={}", toolName, text.length());
             return text;
         } catch (Exception error) {
             observation.lowCardinality(AgentObservationKeys.Low.OUTCOME, "error")
+                    .lowCardinality(AgentObservationKeys.Low.TOOL_OUTCOME, "failed")
+                    .highCardinality(AgentObservationKeys.High.ERROR_TYPE,
+                            errorType(error))
                     .error(new McpCallObservationError());
             recordMcpMetrics(toolName, "error", startedAt);
             log.error("[McpToolInvoker] Tool call failed tool={} errorType={}",
@@ -169,6 +189,40 @@ public class McpToolInvoker {
                 AgentObservationKeys.Low.TOOL_NAME, toolName,
                 AgentObservationKeys.Low.MCP_SERVER_NAME, SERVER_NAME,
                 AgentObservationKeys.Low.OUTCOME, outcome);
+    }
+
+    private int resultCount(String text) {
+        try {
+            var root = objectMapper.readTree(text);
+            if (root.isTextual()) {
+                root = objectMapper.readTree(root.textValue());
+            }
+            var photos = root.get("photos");
+            return photos != null && photos.isArray() ? photos.size() : 0;
+        } catch (Exception ignored) {
+            return 0;
+        }
+    }
+
+    private static String errorType(Throwable error) {
+        Throwable current = error;
+        while (current != null) {
+            String name = current.getClass().getSimpleName().toLowerCase(java.util.Locale.ROOT);
+            String message = current.getMessage() != null
+                    ? current.getMessage().toLowerCase(java.util.Locale.ROOT) : "";
+            if (name.contains("timeout") || message.contains("timeout")
+                    || message.contains("timed out")) {
+                return "mcp_timeout";
+            }
+            current = current.getCause();
+        }
+        return "mcp_error";
+    }
+
+    private record AttemptState(String parentSpanId, int attempt) {
+        private AttemptState {
+            parentSpanId = parentSpanId != null ? parentSpanId : "";
+        }
     }
 
     private static final class McpCallObservationError extends RuntimeException {

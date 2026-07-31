@@ -28,6 +28,7 @@ import reactor.core.publisher.Flux;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Workflow engine that routes user intents to the appropriate execution strategy.
@@ -110,6 +111,14 @@ public class WorkflowEngine {
                             result.source().name().toLowerCase(java.util.Locale.ROOT))
                     .lowCardinality(AgentObservationKeys.Low.TASK_TYPE,
                             plan.taskType().name().toLowerCase(java.util.Locale.ROOT))
+                    .lowCardinality(AgentObservationKeys.Low.PLAN_VALIDATION,
+                            result.validationFailed() ? "fail" : "pass")
+                    .lowCardinality(AgentObservationKeys.Low.PLAN_REPAIR_ATTEMPTED,
+                            result.repairAttempted())
+                    .lowCardinality(AgentObservationKeys.Low.PLAN_FALLBACK_USED,
+                            result.source() == com.zzp.aiagent.agent.task.PlanSource.RULE_FALLBACK)
+                    .highCardinality(AgentObservationKeys.High.PLAN_STEP_COUNT,
+                            plan.steps() != null ? plan.steps().size() : 0)
                     .event("plan.generated");
             if (result.validationFailed()) {
                 observation.event("plan.validation.failed");
@@ -205,6 +214,8 @@ public class WorkflowEngine {
                 plan.turnId(), plan.taskType(), executor.getClass().getSimpleName());
         return Flux.defer(() -> {
             AgentTelemetry.AgentObservation observation = executorObservation(executor, plan);
+            long startedNanos = System.nanoTime();
+            AtomicBoolean firstChunk = new AtomicBoolean();
             Flux<ChatClientResponse> stream;
             try (Observation.Scope ignored = observation.openScope()) {
                 stream = executor.stream(input);
@@ -215,6 +226,16 @@ public class WorkflowEngine {
                 return Flux.error(e);
             }
             return stream
+                    .doOnNext(ignored -> {
+                        if (firstChunk.compareAndSet(false, true)) {
+                            long firstChunkMs = java.time.Duration.ofNanos(
+                                    System.nanoTime() - startedNanos).toMillis();
+                            observation.highCardinality(
+                                            AgentObservationKeys.High.MODEL_TIME_TO_FIRST_CHUNK_MS,
+                                            firstChunkMs)
+                                    .event("gen_ai.response.first_chunk");
+                        }
+                    })
                     .doOnError(error -> {
                         observation.error(error);
                         observation.lowCardinality(AgentObservationKeys.Low.OUTCOME, "error");

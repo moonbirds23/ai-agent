@@ -197,6 +197,8 @@ class ChatServiceImplTest {
                 .hasAnObservationWithAKeyValue(AgentObservationKeys.Low.OUTCOME, "success");
         assertThat(meterRegistry.get("agent.response.time.to.first.token").timer().count())
                 .isEqualTo(1);
+        assertThat(meterRegistry.get("agent.http.time.to.first.sse.token").timer().count())
+                .isEqualTo(1);
     }
 
     @Test

@@ -66,6 +66,12 @@ Prometheus 标签，避免高基数。
 ## 当前限制
 
 - `glm-4-flash` 官方价格为免费，因此文本模型估算成本会显示 `0 CNY`，不是指标失效。
-- 当前本机 `PEXELS_API_KEY` 被 Pexels 判定为认证失败；MCP 注册、传输和 Span 已贯通，
-  但要获得真实图片候选，需要替换为有效的 Pexels API Key 后重启。
+- Spring AI 1.0.0 + MCP SDK 0.10.0 的 SSE Transport 不能可靠地为每次
+  `tools/call` 传播 W3C Trace Context。当前由 MCP Server 创建独立 Trace，并通过
+  Span Link 表达它与主应用 MCP Client Span 的因果关系，同时记录
+  `agent.mcp.trace_context_propagated=false`；不得用 `toolCallId`、`turnId` 或日志字段
+  冒充同一 Trace 的父子链。完整实测案例见
+  [`docs/observability/agent-tracing.md`](../observability/agent-tracing.md)。
+- 2026-07-30 已使用本机 Pexels Key 实测返回 3 条真实候选；Key 只通过环境变量注入，
+  不进入代码、Trace、截图或文档。
 - Jaeger 使用本地内存存储，Jaeger 进程重启后历史 Trace 会清空。

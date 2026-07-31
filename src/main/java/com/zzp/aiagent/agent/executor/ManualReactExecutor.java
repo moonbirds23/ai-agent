@@ -90,8 +90,18 @@ public class ManualReactExecutor implements AgentExecutor {
                     toolObservation
                             .lowCardinality(AgentObservationKeys.Low.OUTCOME,
                                     record.success() ? "success" : "error")
+                            .lowCardinality(AgentObservationKeys.Low.TOOL_OUTCOME,
+                                    record.success() ? "success" : "failed")
                             .lowCardinality(AgentObservationKeys.Low.TOOL_SIDE_EFFECT, record.sideEffect())
                             .lowCardinality(AgentObservationKeys.Low.TOOL_RECOVERABLE, record.recoverable());
+                    int resultCount = resultCount(record);
+                    toolObservation.highCardinality(
+                            AgentObservationKeys.High.TOOL_RESULT_COUNT, resultCount);
+                    if ("generateImage".equals(record.toolName())) {
+                        toolObservation.highCardinality(
+                                AgentObservationKeys.High.GENERATION_REFERENCE_COUNT,
+                                referenceCount(record));
+                    }
                     if (!record.success()) {
                         toolObservation.error(new ManualToolObservationError());
                     }
@@ -170,6 +180,25 @@ public class ManualReactExecutor implements AgentExecutor {
             return "图片分析完成。";
         }
         return step.description() + "已完成。";
+    }
+
+    private static int resultCount(ToolExecutionRecord record) {
+        Object value = record.output().get("candidateCount");
+        if (!(value instanceof Number)) {
+            value = record.output().get("resultCount");
+        }
+        if (value instanceof Number number) {
+            return number.intValue();
+        }
+        return record.resources() != null ? record.resources().size() : 0;
+    }
+
+    private static int referenceCount(ToolExecutionRecord record) {
+        Object value = record.input().get("referencePictureIds");
+        if (value instanceof java.util.Collection<?> collection) {
+            return collection.size();
+        }
+        return 0;
     }
 
     private static String turnIdFrom(Map<String, Object> toolContext) {

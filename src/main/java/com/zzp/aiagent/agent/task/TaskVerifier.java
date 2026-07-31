@@ -60,6 +60,24 @@ public final class TaskVerifier {
         return result;
     }
 
+    /**
+     * Applies request-level side-effect constraints after ordinary step
+     * verification. A successful required tool is not enough when the turn also
+     * performed an explicitly forbidden gallery write.
+     */
+    public static VerificationResult enforceNoSaveConstraint(
+            VerificationResult verification, boolean noSaveRequested,
+            List<ToolExecutionRecord> records) {
+        if (!noSaveRequested || records == null) {
+            return verification;
+        }
+        boolean galleryWrite = records.stream().anyMatch(record ->
+                record.sideEffect() != null && record.sideEffect().startsWith("GALLERY_"));
+        return galleryWrite
+                ? VerificationResult.failed("任务未通过验收：用户要求不保存，但检测到图库写入")
+                : verification;
+    }
+
     // ── per-task-type verification ──────────────────────────────────
 
     /** Image generation: must have generateImage success + imageUrl/imageBase64. */

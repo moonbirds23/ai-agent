@@ -45,6 +45,12 @@ public class TaskPlanRepair {
 
         List<TaskStep> steps = new ArrayList<>(plan.steps());
 
+        if (plan.taskType() == TaskType.WEB_IMAGE_SEARCH) {
+            java.util.Set<String> seenSearchTools = new java.util.LinkedHashSet<>();
+            steps.removeIf(step -> TaskPlanValidator.isSearchTool(step.toolName())
+                    && !seenSearchTools.add(step.toolName()));
+        }
+
         if (asksGeneration && !asksSearch) {
             steps.removeIf(step -> TaskPlanValidator.isSearchTool(step.toolName()));
         }

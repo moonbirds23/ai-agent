@@ -6,6 +6,7 @@ import com.zzp.imageretrievalmcp.config.PexelsConfig;
 import com.zzp.imageretrievalmcp.contract.PexelsPhotoDTO;
 import com.zzp.imageretrievalmcp.contract.PexelsSearchRequest;
 import com.zzp.imageretrievalmcp.contract.PexelsSearchResponse;
+import com.zzp.imageretrievalmcp.observability.McpServerTelemetry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatusCode;
@@ -34,10 +35,13 @@ public class PexelsPhotoServiceImpl implements PexelsPhotoService {
     private final RestClient restClient;
     private final PexelsConfig config;
     private final ObjectMapper objectMapper;
+    private final McpServerTelemetry telemetry;
 
-    public PexelsPhotoServiceImpl(PexelsConfig config, ObjectMapper objectMapper) {
+    public PexelsPhotoServiceImpl(PexelsConfig config, ObjectMapper objectMapper,
+                                  McpServerTelemetry telemetry) {
         this.config = config;
         this.objectMapper = objectMapper;
+        this.telemetry = telemetry;
 
         SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
         requestFactory.setConnectTimeout(Duration.ofSeconds(config.connectTimeoutSeconds()));
@@ -58,21 +62,24 @@ public class PexelsPhotoServiceImpl implements PexelsPhotoService {
         String encodedQuery = UriUtils.encodeQueryParam(request.query(), StandardCharsets.UTF_8);
         String path = "/v1/search?query={query}&per_page={perPage}&page={page}";
 
-        String rawJson = restClient.get()
-                .uri(path, encodedQuery, perPage, request.page())
-                .accept(MediaType.APPLICATION_JSON)
-                .retrieve()
-                .onStatus(this::isAuthError, (req, resp) -> {
-                    throw new PexelsAuthException("Pexels API authentication failed. Verify your API key.");
-                })
-                .onStatus(this::isRateLimit, (req, resp) -> {
-                    throw new PexelsRateLimitException("Pexels API rate limit exceeded. Retry after " +
-                            resp.getHeaders().getFirst("Retry-After") + " seconds.");
-                })
-                .onStatus(HttpStatusCode::is5xxServerError, (req, resp) -> {
-                    throw new RuntimeException("Pexels API server error: HTTP " + resp.getStatusCode().value());
-                })
-                .body(String.class);
+        String rawJson;
+        try (var ignored = telemetry.startPexelsHttp("search")) {
+            rawJson = restClient.get()
+                    .uri(path, encodedQuery, perPage, request.page())
+                    .accept(MediaType.APPLICATION_JSON)
+                    .retrieve()
+                    .onStatus(this::isAuthError, (req, resp) -> {
+                        throw new PexelsAuthException("Pexels API authentication failed. Verify your API key.");
+                    })
+                    .onStatus(this::isRateLimit, (req, resp) -> {
+                        throw new PexelsRateLimitException("Pexels API rate limit exceeded. Retry after " +
+                                resp.getHeaders().getFirst("Retry-After") + " seconds.");
+                    })
+                    .onStatus(HttpStatusCode::is5xxServerError, (req, resp) -> {
+                        throw new RuntimeException("Pexels API server error: HTTP " + resp.getStatusCode().value());
+                    })
+                    .body(String.class);
+        }
 
         long latencyMs = System.currentTimeMillis() - startMs;
         return parseSearchResponse(rawJson, request.query(), request.page(), perPage, latencyMs);
@@ -85,21 +92,24 @@ public class PexelsPhotoServiceImpl implements PexelsPhotoService {
         perPage = Math.min(perPage, config.searchMaxResults());
         String path = "/v1/curated?per_page={perPage}&page={page}";
 
-        String rawJson = restClient.get()
-                .uri(path, perPage, page)
-                .accept(MediaType.APPLICATION_JSON)
-                .retrieve()
-                .onStatus(this::isAuthError, (req, resp) -> {
-                    throw new PexelsAuthException("Pexels API authentication failed. Verify your API key.");
-                })
-                .onStatus(this::isRateLimit, (req, resp) -> {
-                    throw new PexelsRateLimitException("Pexels API rate limit exceeded. Retry after " +
-                            resp.getHeaders().getFirst("Retry-After") + " seconds.");
-                })
-                .onStatus(HttpStatusCode::is5xxServerError, (req, resp) -> {
-                    throw new RuntimeException("Pexels API server error: HTTP " + resp.getStatusCode().value());
-                })
-                .body(String.class);
+        String rawJson;
+        try (var ignored = telemetry.startPexelsHttp("curated")) {
+            rawJson = restClient.get()
+                    .uri(path, perPage, page)
+                    .accept(MediaType.APPLICATION_JSON)
+                    .retrieve()
+                    .onStatus(this::isAuthError, (req, resp) -> {
+                        throw new PexelsAuthException("Pexels API authentication failed. Verify your API key.");
+                    })
+                    .onStatus(this::isRateLimit, (req, resp) -> {
+                        throw new PexelsRateLimitException("Pexels API rate limit exceeded. Retry after " +
+                                resp.getHeaders().getFirst("Retry-After") + " seconds.");
+                    })
+                    .onStatus(HttpStatusCode::is5xxServerError, (req, resp) -> {
+                        throw new RuntimeException("Pexels API server error: HTTP " + resp.getStatusCode().value());
+                    })
+                    .body(String.class);
+        }
 
         long latencyMs = System.currentTimeMillis() - startMs;
         return parseSearchResponse(rawJson, null, page, perPage, latencyMs);
@@ -111,21 +121,24 @@ public class PexelsPhotoServiceImpl implements PexelsPhotoService {
 
         String path = "/v1/photos/{id}";
 
-        String rawJson = restClient.get()
-                .uri(path, photoId)
-                .accept(MediaType.APPLICATION_JSON)
-                .retrieve()
-                .onStatus(this::isAuthError, (req, resp) -> {
-                    throw new PexelsAuthException("Pexels API authentication failed. Verify your API key.");
-                })
-                .onStatus(this::isRateLimit, (req, resp) -> {
-                    throw new PexelsRateLimitException("Pexels API rate limit exceeded. Retry after " +
-                            resp.getHeaders().getFirst("Retry-After") + " seconds.");
-                })
-                .onStatus(HttpStatusCode::is5xxServerError, (req, resp) -> {
-                    throw new RuntimeException("Pexels API server error: HTTP " + resp.getStatusCode().value());
-                })
-                .body(String.class);
+        String rawJson;
+        try (var ignored = telemetry.startPexelsHttp("get")) {
+            rawJson = restClient.get()
+                    .uri(path, photoId)
+                    .accept(MediaType.APPLICATION_JSON)
+                    .retrieve()
+                    .onStatus(this::isAuthError, (req, resp) -> {
+                        throw new PexelsAuthException("Pexels API authentication failed. Verify your API key.");
+                    })
+                    .onStatus(this::isRateLimit, (req, resp) -> {
+                        throw new PexelsRateLimitException("Pexels API rate limit exceeded. Retry after " +
+                                resp.getHeaders().getFirst("Retry-After") + " seconds.");
+                    })
+                    .onStatus(HttpStatusCode::is5xxServerError, (req, resp) -> {
+                        throw new RuntimeException("Pexels API server error: HTTP " + resp.getStatusCode().value());
+                    })
+                    .body(String.class);
+        }
 
         try {
             return objectMapper.readValue(rawJson, PexelsPhotoDTO.class);

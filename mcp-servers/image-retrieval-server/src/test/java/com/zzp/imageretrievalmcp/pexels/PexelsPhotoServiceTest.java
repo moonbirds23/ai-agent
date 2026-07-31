@@ -5,11 +5,14 @@ import com.zzp.imageretrievalmcp.config.PexelsConfig;
 import com.zzp.imageretrievalmcp.contract.PexelsPhotoDTO;
 import com.zzp.imageretrievalmcp.contract.PexelsSearchRequest;
 import com.zzp.imageretrievalmcp.contract.PexelsSearchResponse;
+import com.zzp.imageretrievalmcp.observability.McpServerTelemetry;
+import io.opentelemetry.api.OpenTelemetry;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.support.DefaultListableBeanFactory;
 
 import java.io.IOException;
 import java.io.OutputStream;
@@ -129,7 +132,9 @@ class PexelsPhotoServiceTest {
                 10,
                 5
         );
-        service = new PexelsPhotoServiceImpl(config, new ObjectMapper());
+        McpServerTelemetry telemetry = new McpServerTelemetry(
+                new DefaultListableBeanFactory().getBeanProvider(OpenTelemetry.class));
+        service = new PexelsPhotoServiceImpl(config, new ObjectMapper(), telemetry);
         server.start();
     }
 

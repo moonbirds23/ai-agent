@@ -20,8 +20,13 @@ jobs:
           distribution: temurin
           cache: maven
 
-      - name: Run tests
+      - name: Run main application tests
         run: mvn test
         env:
           ZHIPU_API_KEY: test-fake-key
+          PEXELS_API_KEY: test-fake-key
+
+      - name: Run MCP server tests
+        run: mvn -f mcp-servers/image-retrieval-server/pom.xml test
+        env:
           PEXELS_API_KEY: test-fake-key
